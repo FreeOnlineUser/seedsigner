@@ -310,7 +310,7 @@ class TouchButtons(Singleton):
         else:
             return self.KEY_PRESS
 
-    def wait_for(self, keys=[], check_release=True, release_keys=[]) -> int:
+    def wait_for(self, keys=[], check_release=True, release_keys=[], timeout_ms=0) -> int:
         """
         Wait for touch input matching requested keys.
 
@@ -320,9 +320,10 @@ class TouchButtons(Singleton):
             keys: List of key codes to listen for
             check_release: Whether to wait for touch release
             release_keys: Keys that require release detection
+            timeout_ms: If > 0, return None after this many milliseconds with no input
 
         Returns:
-            Key code that was activated
+            Key code that was activated, or None on timeout
         """
         from seedsigner.controller import Controller
         controller = Controller.get_instance()
@@ -332,9 +333,13 @@ class TouchButtons(Singleton):
 
         self.override_ind = False
         pending_key = None  # Key waiting for release
+        wait_start = int(time.time() * 1000) if timeout_ms > 0 else 0
 
         while True:
             cur_time = int(time.time() * 1000)
+
+            if timeout_ms > 0 and cur_time - wait_start >= timeout_ms:
+                return None
 
             # Screensaver check
             if cur_time - self.last_input_time > controller.screensaver_activation_ms and not controller.is_screensaver_running:

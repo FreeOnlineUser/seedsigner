@@ -263,11 +263,20 @@ class SeedMnemonicEntryView(View):
 
 
     def run(self):
+        # Choose screen class based on keyboard mode setting
+        keyboard_mode = self.settings.get_value(SettingsConstants.SETTING__KEYBOARD_MODE)
+        if keyboard_mode == SettingsConstants.KEYBOARD_MODE__T9:
+            screen_class = seed_screens.SeedMnemonicEntryT9Screen
+            default_initial = [" "]  # T9 starts empty
+        else:
+            screen_class = seed_screens.SeedMnemonicEntryScreen
+            default_initial = ["a"]
+
         ret = self.run_screen(
-            seed_screens.SeedMnemonicEntryScreen,
+            screen_class,
             # TRANSLATOR_NOTE: Inserts the word number (e.g. "Seed Word #6")
             title=_("Seed Word #{}").format(self.cur_word_index + 1),  # Human-readable 1-indexing!
-            initial_letters=list(self.cur_word) if self.cur_word else ["a"],
+            initial_letters=list(self.cur_word) if self.cur_word else default_initial,
             wordlist=Seed.get_wordlist(wordlist_language_code=self.settings.get_value(SettingsConstants.SETTING__WORDLIST_LANGUAGE)),
         )
 

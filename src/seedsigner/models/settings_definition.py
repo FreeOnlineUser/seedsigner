@@ -302,6 +302,13 @@ class SettingsConstants:
         (MICROSD_TOAST_TIMER_FOREVER, "Until SD removed")
     ]
 
+    KEYBOARD_MODE__STANDARD = "std"
+    KEYBOARD_MODE__T9 = "t9"
+    ALL_KEYBOARD_MODES = [
+        (KEYBOARD_MODE__STANDARD, _mft("Standard")),
+        (KEYBOARD_MODE__T9, _mft("T9")),
+    ]
+
     WORDLIST_LANGUAGE__ENGLISH = "en"
     WORDLIST_LANGUAGE__CHINESE_SIMPLIFIED = "zh_Hans_CN"
     WORDLIST_LANGUAGE__CHINESE_TRADITIONAL = "zh_Hant_TW"
@@ -349,6 +356,7 @@ class SettingsConstants:
     SETTING__QR_BRIGHTNESS_TIPS = "qr_brightness_tips"
     SETTING__PARTNER_LOGOS = "partner_logos"
     SETTING__MICROSD_TOAST_TIMER = "microsd_toast_timer"
+    SETTING__KEYBOARD_MODE = "keyboard_mode"
 
     SETTING__DEBUG = "debug"
 
@@ -687,6 +695,15 @@ class SettingsDefinition:
                       default_value=SettingsConstants.MICROSD_TOAST_TIMER_FIVE_SECONDS),
 
         SettingsEntry(category=SettingsConstants.CATEGORY__FEATURES,
+                      attr_name=SettingsConstants.SETTING__KEYBOARD_MODE,
+                      abbreviated_name="kbd_mode",
+                      display_name=_mft("Seed keyboard"),
+                      type=SettingsConstants.TYPE__SELECT_1,
+                      visibility=SettingsConstants.VISIBILITY__ADVANCED,
+                      selection_options=SettingsConstants.ALL_KEYBOARD_MODES,
+                      default_value=SettingsConstants.KEYBOARD_MODE__STANDARD),
+
+        SettingsEntry(category=SettingsConstants.CATEGORY__FEATURES,
                       attr_name=SettingsConstants.SETTING__MESSAGE_SIGNING,
                       display_name=_mft("Message signing"),
                       visibility=SettingsConstants.VISIBILITY__ADVANCED,
@@ -794,9 +811,10 @@ class SettingsDefinition:
             else:
                 as_dict[entry.attr_name] = entry.default_value
 
-        # Adjust camera rotation default for touchscreen mode (90° instead of 180°)
+        # Adjust defaults for touchscreen mode
         if os.environ.get('SEEDSIGNER_TOUCH') == '1':
             as_dict[SettingsConstants.SETTING__CAMERA_ROTATION] = SettingsConstants.CAMERA_ROTATION__90
+            as_dict[SettingsConstants.SETTING__KEYBOARD_MODE] = SettingsConstants.KEYBOARD_MODE__T9
 
         return as_dict
 
