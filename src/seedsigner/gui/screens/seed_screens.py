@@ -307,7 +307,7 @@ class SeedMnemonicEntryScreen(BaseTopNavScreen):
 
         first_input = True
         while True:
-            input = self.hw_inputs.wait_for(HardwareButtonsConstants.ALL_KEYS)
+            input = self.hw_inputs.wait_for(HardwareButtonsConstants.ALL_KEYS, check_release=False)
 
             # Check for direct back button tap (touchscreen - top left corner of screen)
             if hasattr(self.hw_inputs, 'was_back_button_tapped'):
@@ -789,13 +789,15 @@ class SeedMnemonicEntryT9Screen(BaseTopNavScreen):
         while True:
             # Use timeout when cycling to auto-commit
             timeout = self.CYCLING_TIMEOUT_MS if cycling else 0
-            input_key = self.hw_inputs.wait_for(HardwareButtonsConstants.ALL_KEYS, timeout_ms=timeout)
+            input_key = self.hw_inputs.wait_for(HardwareButtonsConstants.ALL_KEYS, check_release=False, timeout_ms=timeout)
 
             # Timeout - commit the cycling letter
             if input_key is None and cycling:
                 committed = self.t9_pad.commit_cycling()
                 if committed:
                     self._commit_letter(committed)
+                else:
+                    self.calc_possible_alphabet()
                 cycling = False
                 with self.renderer.lock:
                     self.t9_pad.render_keys()
@@ -884,6 +886,8 @@ class SeedMnemonicEntryT9Screen(BaseTopNavScreen):
                         committed = self.t9_pad.commit_cycling()
                         if committed:
                             self._commit_letter(committed)
+                        else:
+                            self.calc_possible_alphabet()
 
                     # Start or continue cycling on this key
                     letter = self.t9_pad.start_cycling(tapped_t9_key)
@@ -914,6 +918,8 @@ class SeedMnemonicEntryT9Screen(BaseTopNavScreen):
                     committed = self.t9_pad.commit_cycling()
                     if committed:
                         self._commit_letter(committed)
+                    else:
+                        self.calc_possible_alphabet()
                     cycling = False
                 if self.possible_words:
                     final_selection = self.possible_words[self.selected_possible_words_index]
@@ -969,6 +975,8 @@ class SeedMnemonicEntryT9Screen(BaseTopNavScreen):
                     committed = self.t9_pad.commit_cycling()
                     if committed:
                         self._commit_letter(committed)
+                    else:
+                        self.calc_possible_alphabet()
                     cycling = False
                 self.is_input_in_top_nav = True
                 self.top_nav.left_button.is_selected = True
@@ -1455,7 +1463,7 @@ class SeedAddPassphraseScreen(BaseTopNavScreen):
 
         # Start the interactive update loop
         while True:
-            input = self.hw_inputs.wait_for(HardwareButtonsConstants.ALL_KEYS)
+            input = self.hw_inputs.wait_for(HardwareButtonsConstants.ALL_KEYS, check_release=False)
 
             keyboard_swap = False
 

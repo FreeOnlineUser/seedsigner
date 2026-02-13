@@ -810,8 +810,8 @@ class T9Pad:
         else:
             bg = self.background_color
             outline = "#333"
-            num_color = "#e8e8e8"
-            letter_color = "#999"
+            num_color = "#999"
+            letter_color = "#e8e8e8"
 
         self.draw.rounded_rectangle((x1, y1, x2, y2), fill=bg, radius=4, outline=outline)
 
@@ -836,7 +836,7 @@ class T9Pad:
             elif ch in valid_letters:
                 lc = letter_color
             else:
-                lc = "#555"
+                lc = "#333"
             self.draw.text((lx, letter_y), ch, fill=lc, font=self.letter_font, anchor="ms")
 
     def get_key_at_screen_coords(self, x: int, y: int):
