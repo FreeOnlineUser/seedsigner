@@ -32,6 +32,8 @@ class Seed:
         self._passphrase: str = ""
         self.set_passphrase(passphrase, regenerate_seed=False)
 
+        self._parent_fingerprint: str = None
+
         self.seed_bytes: bytes = None
         self._generate_seed()
 
@@ -91,6 +93,15 @@ class Seed:
     @property
     def passphrase_display(self):
         return unicodedata.normalize("NFC", self._passphrase)
+
+
+    @property
+    def parent_fingerprint(self):
+        return self._parent_fingerprint
+
+    @parent_fingerprint.setter
+    def parent_fingerprint(self, value: str):
+        self._parent_fingerprint = value
 
 
     def set_passphrase(self, passphrase: str, regenerate_seed: bool = True):

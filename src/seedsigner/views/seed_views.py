@@ -23,15 +23,54 @@ logger = logging.getLogger(__name__)
 
 
 
+def get_seed_display_fingerprint(seed, seeds_list, network):
+    """Return fingerprint with lineage notation if applicable.
+
+    Parents with children show (pN). Children show (pN)(sM).
+    """
+    fp = seed.get_fingerprint(network)
+
+    # Build ordered list of unique parent fingerprints (only for parents still loaded)
+    parent_fps = []
+    for s in seeds_list:
+        if s.parent_fingerprint and s.parent_fingerprint not in parent_fps:
+            for candidate in seeds_list:
+                if candidate.get_fingerprint(network) == s.parent_fingerprint:
+                    parent_fps.append(s.parent_fingerprint)
+                    break
+
+    # If this seed IS a parent, show (pN)
+    my_fp = fp
+    if my_fp in parent_fps:
+        p_num = parent_fps.index(my_fp) + 1
+        return f"{fp} (p{p_num})"
+
+    # If this seed HAS a parent still loaded, show (pN)(sM)
+    if seed.parent_fingerprint and seed.parent_fingerprint in parent_fps:
+        p_num = parent_fps.index(seed.parent_fingerprint) + 1
+        # Determine sibling order among children of the same parent
+        s_num = 0
+        for s in seeds_list:
+            if s.parent_fingerprint == seed.parent_fingerprint:
+                s_num += 1
+                if s is seed:
+                    break
+        return f"{fp} (p{p_num})(s{s_num})"
+
+    return fp
+
+
+
 class SeedsMenuView(View):
     LOAD = ButtonOption("Load a seed")
 
     def __init__(self):
         super().__init__()
         self.seeds = []
+        network = self.settings.get_value(SettingsConstants.SETTING__NETWORK)
         for seed in self.controller.storage.seeds:
             self.seeds.append({
-                "fingerprint": seed.get_fingerprint(self.settings.get_value(SettingsConstants.SETTING__NETWORK))
+                "fingerprint": get_seed_display_fingerprint(seed, self.controller.storage.seeds, network)
             })
 
 
@@ -104,8 +143,9 @@ class SeedSelectSeedView(View):
             raise Exception(f"Unsupported `flow` specified: {self.flow}")
 
         button_data = []
+        network = self.settings.get_value(SettingsConstants.SETTING__NETWORK)
         for seed in seeds:
-            button_str = seed.get_fingerprint(self.settings.get_value(SettingsConstants.SETTING__NETWORK))
+            button_str = get_seed_display_fingerprint(seed, seeds, network)
             button_data.append(ButtonOption(button_str, SeedSignerIconConstants.FINGERPRINT, icon_color="blue"))
         
         button_data.append(self.SCAN_SEED)
@@ -589,7 +629,7 @@ class SeedOptionsView(View):
         selected_menu_num = self.run_screen(
             seed_screens.SeedOptionsScreen,
             button_data=button_data,
-            fingerprint=self.seed.get_fingerprint(self.settings.get_value(SettingsConstants.SETTING__NETWORK)),
+            fingerprint=get_seed_display_fingerprint(self.seed, self.controller.storage.seeds, self.settings.get_value(SettingsConstants.SETTING__NETWORK)),
         )
 
         if selected_menu_num == RET_CODE__BACK_BUTTON:
@@ -1235,7 +1275,19 @@ class SeedWordsBackupTestPromptView(View):
             )
 
         elif button_data[selected_menu_num] == self.SKIP:
-            if self.seed_num is not None:
+            if self.bip85_data is not None:
+                # Auto-import the BIP-85 child seed
+                parent_seed = self.controller.get_seed(self.seed_num)
+                network = self.settings.get_value(SettingsConstants.SETTING__NETWORK)
+                child_mnemonic = parent_seed.get_bip85_child_mnemonic(
+                    self.bip85_data["child_index"], self.bip85_data["num_words"]
+                ).split()
+                child_seed = Seed(mnemonic=child_mnemonic)
+                child_seed.parent_fingerprint = parent_seed.get_fingerprint(network)
+                self.controller.storage.set_pending_seed(child_seed)
+                child_seed_num = self.controller.storage.finalize_pending_seed()
+                return Destination(SeedOptionsView, view_args=dict(seed_num=child_seed_num), clear_history=True)
+            elif self.seed_num is not None:
                 return Destination(SeedOptionsView, view_args=dict(seed_num=self.seed_num))
             else:
                 return Destination(SeedFinalizeView)
@@ -1293,11 +1345,17 @@ class SeedWordsBackupTestView(View):
         selected_menu_num = self.run_screen(
             ButtonListScreen,
             title=title,
-            show_back_button=False,
+            show_back_button=True,
             button_data=button_data,
             is_bottom_list=True,
             is_button_text_centered=True,
         )
+
+        if selected_menu_num == RET_CODE__BACK_BUTTON:
+            return Destination(
+                SeedWordsBackupTestPromptView,
+                view_args=dict(seed_num=self.seed_num, bip85_data=self.bip85_data),
+            )
 
         if button_data[selected_menu_num] == real_word:
             self.confirmed_list.append(self.cur_index)
@@ -1305,7 +1363,7 @@ class SeedWordsBackupTestView(View):
                 # Successfully confirmed the full mnemonic!
                 return Destination(
                     SeedWordsBackupTestSuccessView,
-                    view_args=dict(seed_num=self.seed_num),
+                    view_args=dict(seed_num=self.seed_num, bip85_data=self.bip85_data),
                 )
             else:
                 # Continue testing the remaining words
@@ -1381,9 +1439,10 @@ class SeedWordsBackupTestMistakeView(View):
 
 
 class SeedWordsBackupTestSuccessView(View):
-    def __init__(self, seed_num: int):
+    def __init__(self, seed_num: int, bip85_data: dict = None):
         super().__init__()
         self.seed_num = seed_num
+        self.bip85_data = bip85_data
 
     def run(self):
         from seedsigner.gui.screens.screen import LargeIconStatusScreen
@@ -1396,7 +1455,19 @@ class SeedWordsBackupTestSuccessView(View):
             button_data=[ButtonOption("OK")]
         )
 
-        if self.seed_num is not None:
+        if self.bip85_data is not None:
+            # Auto-import the BIP-85 child seed
+            parent_seed = self.controller.get_seed(self.seed_num)
+            network = self.settings.get_value(SettingsConstants.SETTING__NETWORK)
+            child_mnemonic = parent_seed.get_bip85_child_mnemonic(
+                self.bip85_data["child_index"], self.bip85_data["num_words"]
+            ).split()
+            child_seed = Seed(mnemonic=child_mnemonic)
+            child_seed.parent_fingerprint = parent_seed.get_fingerprint(network)
+            self.controller.storage.set_pending_seed(child_seed)
+            child_seed_num = self.controller.storage.finalize_pending_seed()
+            return Destination(SeedOptionsView, view_args=dict(seed_num=child_seed_num), clear_history=True)
+        elif self.seed_num is not None:
             return Destination(SeedOptionsView, view_args=dict(seed_num=self.seed_num), clear_history=True)
         else:
             return Destination(SeedFinalizeView)
