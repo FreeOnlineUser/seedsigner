@@ -26,7 +26,8 @@ logger = logging.getLogger(__name__)
 def get_seed_display_fingerprint(seed, seeds_list, network):
     """Return fingerprint with lineage notation if applicable.
 
-    Parents with children show (pN). Children show (pN)(sM).
+    Single parent: children show (sN), parent has no label.
+    Multiple parents: parents show (pN), children show (pN)(sN).
     """
     fp = seed.get_fingerprint(network)
 
@@ -39,15 +40,17 @@ def get_seed_display_fingerprint(seed, seeds_list, network):
                     parent_fps.append(s.parent_fingerprint)
                     break
 
-    # If this seed IS a parent, show (pN)
-    my_fp = fp
-    if my_fp in parent_fps:
-        p_num = parent_fps.index(my_fp) + 1
-        return f"{fp} (p{p_num})"
+    multi_parent = len(parent_fps) > 1
 
-    # If this seed HAS a parent still loaded, show (pN)(sM)
+    # If this seed IS a parent, show (pN) only when multiple parents exist
+    if fp in parent_fps:
+        if multi_parent:
+            p_num = parent_fps.index(fp) + 1
+            return f"{fp} (p{p_num})"
+        return fp
+
+    # If this seed HAS a parent still loaded, show lineage
     if seed.parent_fingerprint and seed.parent_fingerprint in parent_fps:
-        p_num = parent_fps.index(seed.parent_fingerprint) + 1
         # Determine sibling order among children of the same parent
         s_num = 0
         for s in seeds_list:
@@ -55,7 +58,10 @@ def get_seed_display_fingerprint(seed, seeds_list, network):
                 s_num += 1
                 if s is seed:
                     break
-        return f"{fp} (p{p_num})(s{s_num})"
+        if multi_parent:
+            p_num = parent_fps.index(seed.parent_fingerprint) + 1
+            return f"{fp} (p{p_num})(s{s_num})"
+        return f"{fp} (s{s_num})"
 
     return fp
 
