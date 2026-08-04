@@ -46,10 +46,22 @@ class TestSeedDisplayLabels(BaseTest):
         after = label(c12, [parent, c12])
         assert before == after == f"{c12.get_fingerprint(NETWORK)} (c12)"
 
-    def test_max_index(self):
+    def test_max_index_elides_middle(self):
+        # 2147483647 can't fit any 240px surface; middle-elide with an explicit
+        # ".." so partial digits never read as a complete different index
         parent = Seed(mnemonic=PARENT_A)
         huge = make_child(parent, 2**31 - 1)
-        assert label(huge, [parent, huge]) == f"{huge.get_fingerprint(NETWORK)} (c2147483647)"
+        assert label(huge, [parent, huge]) == f"{huge.get_fingerprint(NETWORK)} (c21..47)"
+
+    def test_elision_threshold(self):
+        parent = Seed(mnemonic=PARENT_A)
+        six_digits = make_child(parent, 999999)
+        seven_digits = make_child(parent, 1234567)
+        seeds = [parent, six_digits, seven_digits]
+
+        # Up to 6 digits fits everywhere and must show in full
+        assert label(six_digits, seeds) == f"{six_digits.get_fingerprint(NETWORK)} (c999999)"
+        assert label(seven_digits, seeds) == f"{seven_digits.get_fingerprint(NETWORK)} (c12..67)"
 
     def test_index_zero_is_labeled(self):
         # Index 0 is a real, distinct child - must never render as falsy/absent

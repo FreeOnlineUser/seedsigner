@@ -23,6 +23,19 @@ logger = logging.getLogger(__name__)
 
 
 
+def _format_child_index(index: int) -> str:
+    """
+    Display form of a BIP-85 child index (0 to 2^31-1). Indices over 6 digits
+    can't fit the display surfaces, so elide the middle digits. The ".." makes
+    the elision explicit: partial digits must never read as a complete,
+    different index.
+    """
+    digits = str(index)
+    if len(digits) <= 6:
+        return digits
+    return f"{digits[:2]}..{digits[-2:]}"
+
+
 def get_seed_display_fingerprint(seed, seeds_list, network):
     """Return fingerprint with lineage notation if applicable.
 
@@ -32,6 +45,7 @@ def get_seed_display_fingerprint(seed, seeds_list, network):
     N in (cN) is the seed's actual BIP-85 child index (0-based), NOT a
     positional counter: labels must stay stable when siblings are discarded,
     and must match the index needed to re-derive the child from its parent.
+    Indices over 6 digits are shown middle-elided (e.g. c21..47).
     """
     fp = seed.get_fingerprint(network)
 
@@ -58,7 +72,7 @@ def get_seed_display_fingerprint(seed, seeds_list, network):
         # "c?" should be unreachable (the index is set wherever parent_fingerprint
         # is), but never guess: a wrong index is a funds-recovery hazard
         child_index = getattr(seed, "bip85_child_index", None)
-        c_label = f"c{child_index}" if child_index is not None else "c?"
+        c_label = f"c{_format_child_index(child_index)}" if child_index is not None else "c?"
         if multi_parent:
             p_num = parent_fps.index(seed.parent_fingerprint) + 1
             return f"{fp} (p{p_num})({c_label})"
