@@ -6,6 +6,7 @@ any hardware (no /dev/input, no evdev, no touchscreen).
 """
 
 import struct
+import time
 import pytest
 from unittest.mock import patch, MagicMock
 
@@ -109,10 +110,14 @@ class TestTouchInputPoll:
             t.fd = 999  # Fake file descriptor
             return t
 
-    def _make_event(self, ev_type, ev_code, ev_value):
-        """Build a raw 16-byte Linux input_event struct."""
+    def _make_event(self, ev_type, ev_code, ev_value, ts_ms=None):
+        """Build a raw 16-byte Linux input_event struct, stamped 'now' unless given."""
         # tv_sec(4) + tv_usec(4) + type(2) + code(2) + value(4) = 16 bytes
-        return struct.pack("IIHHi", 0, 0, ev_type, ev_code, ev_value)
+        # A realistic timestamp matters: poll() discards taps staler than
+        # TouchInput.MAX_EVENT_AGE_MS by design
+        if ts_ms is None:
+            ts_ms = int(time.time() * 1000)
+        return struct.pack("IIHHi", ts_ms // 1000, (ts_ms % 1000) * 1000, ev_type, ev_code, ev_value)
 
     def test_poll_no_device(self):
         """poll() returns None when no device is open."""
@@ -160,3 +165,90 @@ class TestTouchInputPoll:
         t = self._make_touch()
         with patch('select.select', return_value=([], [], [])):
             assert t.poll() is None
+
+
+class TestTouchEventQueue:
+    """
+    Test the tap-event queue: taps that accumulate while the main loop is busy
+    rendering must deliver in order, with bounce and staleness guards.
+    Feeds _process_event() directly (the post-struct-parsing entry point).
+    """
+
+    def _make_touch(self):
+        # No device on the test host: fd stays None, so poll() only serves the queue
+        with patch.object(TouchInput, '_init_device'):
+            return TouchInput(screen_width=480, screen_height=640)
+
+    def _send_touch_edge(self, t, ts_ms, down, raw_x=100, raw_y=100):
+        """Feed one complete down or up packet through the event state machine."""
+        t._process_event(ts_ms, EV_ABS, ABS_MT_TRACKING_ID, 0 if down else -1)
+        t._process_event(ts_ms, EV_ABS, ABS_MT_POSITION_X, raw_x)
+        t._process_event(ts_ms, EV_ABS, ABS_MT_POSITION_Y, raw_y)
+        t._process_event(ts_ms, EV_SYN, 0, 0)
+
+    def _drain_types(self, t):
+        events = []
+        while True:
+            event = t.poll()
+            if event is None:
+                return events
+            events.append(event[0])
+
+    def test_buffered_tap_is_not_swallowed(self):
+        """A whole tap (down+up) buffered during a render delivers BOTH events in order."""
+        t = self._make_touch()
+        now = int(time.time() * 1000)
+        self._send_touch_edge(t, now - 200, down=True)
+        self._send_touch_edge(t, now - 150, down=False)
+        assert self._drain_types(t) == ["down", "up"]
+
+    def test_contact_bounce_fires_once(self):
+        """Finger micro-lift mid-press: the re-down within DEBOUNCE_MS must not re-fire."""
+        t = self._make_touch()
+        now = int(time.time() * 1000)
+        self._send_touch_edge(t, now - 500, down=True)
+        self._send_touch_edge(t, now - 400, down=False)
+        self._send_touch_edge(t, now - 380, down=True)   # bounce: 20ms after release
+        self._send_touch_edge(t, now - 100, down=False)
+        events = self._drain_types(t)
+        assert events.count("down") == 1
+        assert events[0] == "down"
+
+    def test_deliberate_double_tap_fires_twice(self):
+        """T9 multi-tap cycling: two taps ~200ms apart must both register."""
+        t = self._make_touch()
+        now = int(time.time() * 1000)
+        self._send_touch_edge(t, now - 500, down=True)
+        self._send_touch_edge(t, now - 420, down=False)
+        self._send_touch_edge(t, now - 220, down=True)   # 200ms after release
+        self._send_touch_edge(t, now - 140, down=False)
+        assert self._drain_types(t) == ["down", "up", "down", "up"]
+
+    def test_stale_tap_is_discarded(self):
+        """A tap older than MAX_EVENT_AGE_MS must not fire on whatever screen shows now."""
+        t = self._make_touch()
+        now = int(time.time() * 1000)
+        self._send_touch_edge(t, now - 5000, down=True)
+        self._send_touch_edge(t, now - 4900, down=False)
+        assert "down" not in self._drain_types(t)
+
+    def test_render_delayed_tap_survives(self):
+        """A few hundred ms of render blocking is the case the queue exists for."""
+        t = self._make_touch()
+        now = int(time.time() * 1000)
+        self._send_touch_edge(t, now - 400, down=True)
+        assert self._drain_types(t) == ["down"]
+
+    def test_empty_queue_returns_none(self):
+        t = self._make_touch()
+        assert t.poll() is None
+
+    def test_coordinates_are_transformed(self):
+        """Queued events carry transformed screen coords, not raw panel coords."""
+        t = self._make_touch()
+        self._send_touch_edge(t, int(time.time() * 1000), down=True, raw_x=320, raw_y=240)
+        event = t.poll()
+        assert event is not None
+        event_type, x, y = event
+        assert event_type == "down"
+        assert (x, y) == (240, 320)  # 320/640*480, 240/480*640

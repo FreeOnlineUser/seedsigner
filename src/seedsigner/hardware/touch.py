@@ -9,6 +9,8 @@ import logging
 import struct
 import select
 import os
+import time
+from collections import deque
 from typing import Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -30,7 +32,30 @@ class TouchInput:
     """
     Handles touch input from capacitive touchscreen.
     Reads raw Linux input events - no external dependencies required.
+
+    Taps are queued and delivered strictly in order, one per poll() call, so a
+    tap that completes while the main loop is busy rendering is delayed, never
+    dropped. Two guards keep the queue honest:
+    - a re-touch within DEBOUNCE_MS of a release is contact bounce, not a new
+      tap, and is not queued
+    - a queued tap older than MAX_EVENT_AGE_MS is discarded at delivery time:
+      the screen it was aimed at may no longer be showing
     """
+
+    # input_event struct on 32-bit ARM (Pi Zero):
+    # tv_sec(4) + tv_usec(4) + type(2) + code(2) + value(4) = 16 bytes
+    EVENT_SIZE = 16
+
+    # A new touch this soon (ms) after a release is contact bounce / finger
+    # micro-lift. Deliberate T9 multi-taps run >= ~120ms apart, so legitimate
+    # rapid taps always clear this window.
+    DEBOUNCE_MS = 50
+
+    # Never deliver a tap older than this (ms). Kernel event timestamps and
+    # time.time() both read CLOCK_REALTIME, so the comparison is valid even
+    # with no RTC/NTP. Render-blocked delays are a few hundred ms, so real
+    # delayed taps always survive this cutoff.
+    MAX_EVENT_AGE_MS = 1000
 
     def __init__(self, device_path: str = None,
                  screen_width: int = 480, screen_height: int = 640,
@@ -45,6 +70,15 @@ class TouchInput:
         self.y = 0
         self.touching = False
         self.fd = None
+
+        # Queued ("down"|"up", x, y, ts_ms) tuples awaiting delivery
+        self._pending_events = deque()
+        self._last_up_ms = None  # timestamp of last release; None until first up
+        # Packet state persists across reads in case a SYN-delimited packet is
+        # split between two drains
+        self._pending_down = False
+        self._pending_up = False
+        self._last_move = None
 
         self._init_device(device_path)
 
@@ -77,65 +111,88 @@ class TouchInput:
             logger.info("No touch device found")
 
     def poll(self) -> Optional[Tuple[str, int, int]]:
-        """Poll for touch events (non-blocking)."""
-        if self.fd is None:
-            return None
+        """
+        Poll for touch events (non-blocking).
 
-        try:
-            r, _, _ = select.select([self.fd], [], [], 0)
-            if not r:
-                return None
+        Delivers queued down/up events strictly in order, ONE per call: if the
+        caller was busy while a whole tap (down+up) accumulated in the kernel
+        buffer, both events still come through on consecutive calls instead of
+        the down being lost.
+        """
+        if self.fd is not None:
+            try:
+                self._drain_kernel_events()
+            except Exception:
+                pass
 
-            # input_event struct on 32-bit ARM (Pi Zero):
-            # tv_sec(4) + tv_usec(4) + type(2) + code(2) + value(4) = 16 bytes
-            EVENT_SIZE = 16
+        now_ms = int(time.time() * 1000)
+        while self._pending_events:
+            event_type, x, y, ts_ms = self._pending_events.popleft()
+            if event_type == "down" and now_ms - ts_ms > self.MAX_EVENT_AGE_MS:
+                # Stale tap: the loop was blocked so long the screen may have
+                # changed; firing it now would tap something the user never
+                # aimed at. Its paired "up" still delivers (an unmatched
+                # release is a no-op downstream and keeps touch state honest).
+                continue
+            return (event_type, x, y)
 
-            result = None
-            pending_down = False
-            pending_up = False
+        if self._last_move is not None:
+            move = self._last_move
+            self._last_move = None
+            if self.touching:
+                return move
+        return None
 
-            while True:
-                try:
-                    data = os.read(self.fd, EVENT_SIZE)
-                    if len(data) < EVENT_SIZE:
-                        break
+    def _drain_kernel_events(self):
+        """Read all buffered kernel input events into the pending queue."""
+        r, _, _ = select.select([self.fd], [], [], 0)
+        if not r:
+            return
 
-                    ev_type, ev_code, ev_value = struct.unpack("HHi", data[8:16])
+        while True:
+            try:
+                data = os.read(self.fd, self.EVENT_SIZE)
+            except Exception:
+                break
+            if len(data) < self.EVENT_SIZE:
+                break
 
-                    if ev_type == EV_ABS:
-                        if ev_code == ABS_MT_POSITION_X:
-                            self.x = ev_value
-                        elif ev_code == ABS_MT_POSITION_Y:
-                            self.y = ev_value
-                        elif ev_code == ABS_MT_TRACKING_ID:
-                            if ev_value >= 0:
-                                self.touching = True
-                                pending_down = True
-                            else:
-                                self.touching = False
-                                pending_up = True
+            (tv_sec, tv_usec) = struct.unpack("II", data[0:8])
+            (ev_type, ev_code, ev_value) = struct.unpack("HHi", data[8:16])
+            self._process_event(tv_sec * 1000 + tv_usec // 1000, ev_type, ev_code, ev_value)
 
-                    elif ev_type == EV_SYN:
-                        # SYN marks end of event packet - coordinates now complete
-                        x, y = self._transform(self.x, self.y)
-                        if pending_down:
-                            result = ("down", x, y)
-                            pending_down = False
-                        elif pending_up:
-                            result = ("up", x, y)
-                            pending_up = False
-                        elif self.touching:
-                            result = ("move", x, y)
+    def _process_event(self, ts_ms: int, ev_type: int, ev_code: int, ev_value: int):
+        """Feed one input event through the packet state machine."""
+        if ev_type == EV_ABS:
+            if ev_code == ABS_MT_POSITION_X:
+                self.x = ev_value
+            elif ev_code == ABS_MT_POSITION_Y:
+                self.y = ev_value
+            elif ev_code == ABS_MT_TRACKING_ID:
+                if ev_value >= 0:
+                    self.touching = True
+                    self._pending_down = True
+                else:
+                    self.touching = False
+                    self._pending_up = True
 
-                except BlockingIOError:
-                    break
-                except Exception:
-                    break
-
-            return result
-
-        except Exception:
-            return None
+        elif ev_type == EV_SYN:
+            # SYN marks end of event packet - coordinates now complete
+            x, y = self._transform(self.x, self.y)
+            if self._pending_down:
+                self._pending_down = False
+                # Debounce only against an actually-seen release, so behavior
+                # doesn't depend on the kernel clock's timestamp base
+                if self._last_up_ms is None or ts_ms - self._last_up_ms >= self.DEBOUNCE_MS:
+                    self._pending_events.append(("down", x, y, ts_ms))
+                # else: contact bounce - the same physical touch continuing;
+                # queuing it would fire a second tap the user never made
+            elif self._pending_up:
+                self._pending_up = False
+                self._last_up_ms = ts_ms
+                self._pending_events.append(("up", x, y, ts_ms))
+            elif self.touching:
+                self._last_move = ("move", x, y)
 
     def _transform(self, raw_x: int, raw_y: int) -> Tuple[int, int]:
         """Transform raw touch coordinates to screen coordinates."""
