@@ -888,22 +888,30 @@ class SeedMnemonicEntryT9Screen(BaseTopNavScreen):
                             self._commit_letter(committed)
                         else:
                             self.calc_possible_alphabet()
+                        cycling = False
 
-                    # Start or continue cycling on this key
-                    letter = self.t9_pad.start_cycling(tapped_t9_key)
-                    if letter:
-                        cycling = True
-                        # Show preview: committed letters + cycling letter + cursor
-                        preview = self.letters[:-1]  # Remove trailing space
-                        preview_text = "".join(preview) + letter + " "
-                        self.text_entry_display.cur_text = preview_text
+                    valid_letters = self.t9_pad.get_valid_letters(tapped_t9_key)
+                    if not cycling and len(valid_letters) == 1:
+                        # Only one letter on this key can continue a valid word:
+                        # commit it immediately, no cycle wait
+                        self._commit_letter(valid_letters[0])
+                        self.text_entry_display.cur_text = "".join(self.letters)
+                    else:
+                        # Start or continue cycling on this key
+                        letter = self.t9_pad.start_cycling(tapped_t9_key)
+                        if letter:
+                            cycling = True
+                            # Show preview: committed letters + cycling letter + cursor
+                            preview = self.letters[:-1]  # Remove trailing space
+                            preview_text = "".join(preview) + letter + " "
+                            self.text_entry_display.cur_text = preview_text
 
-                        # Preview word matches with the cycling letter
-                        preview_letters = preview + [letter, " "]
-                        old_letters = self.letters
-                        self.letters = preview_letters
-                        self.calc_possible_words()
-                        self.letters = old_letters
+                            # Preview word matches with the cycling letter
+                            preview_letters = preview + [letter, " "]
+                            old_letters = self.letters
+                            self.letters = preview_letters
+                            self.calc_possible_words()
+                            self.letters = old_letters
 
                     self.t9_pad.render_keys()
                     self.text_entry_display.render()

@@ -832,7 +832,8 @@ class T9Pad:
         for i, ch in enumerate(letters):
             lx = start_x + i * spacing + spacing // 2
             if is_cycling and ch == self.cycling_letter:
-                lc = "black" if ch in valid_letters else "#666"
+                # Cycling only ever lands on valid letters
+                lc = "black"
             elif ch in valid_letters:
                 lc = letter_color
             else:
@@ -871,28 +872,29 @@ class T9Pad:
         """
         Start or continue cycling on a T9 key.
 
-        Cycles through ALL letters on the key (preserving tap count / muscle memory).
-        Invalid letters are shown dimmed and discarded on commit.
+        Cycles through only the letters that can still form a valid BIP39 word
+        given the committed prefix; invalid letters are shown dimmed and are
+        never offered.
 
         Args:
             key_num: T9 key (2-9)
 
         Returns:
-            The current cycling letter, or None if key has no letters
+            The current cycling letter, or None if key has no valid letters
         """
-        all_letters = self.T9_GROUPS.get(key_num)
-        if not all_letters:
+        valid_letters = self.get_valid_letters(key_num)
+        if not valid_letters:
             return None
 
         if self.cycling_key == key_num:
-            # Same key - advance to next letter (all letters, not just valid)
-            self.cycling_index = (self.cycling_index + 1) % len(all_letters)
+            # Same key - advance to next valid letter
+            self.cycling_index = (self.cycling_index + 1) % len(valid_letters)
         else:
             # New key
             self.cycling_key = key_num
             self.cycling_index = 0
 
-        self.cycling_letter = all_letters[self.cycling_index]
+        self.cycling_letter = valid_letters[self.cycling_index]
 
         # Update selection visual
         for row_idx, row in enumerate(self.key_layout):
