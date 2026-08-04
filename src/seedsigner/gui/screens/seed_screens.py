@@ -1029,6 +1029,16 @@ class SeedOptionsScreen(ButtonListScreen):
         self.is_button_text_centered = False
         self.is_bottom_list = True
 
+        # The icon'd top nav title can't scroll, so an overlong lineage label
+        # (e.g. "(c2147483647)") would clip mid-digits and read as a DIFFERENT
+        # valid child index. If the full label can't fit, cap to the bare
+        # fingerprint; the full label remains visible in the seeds list.
+        title_font = Fonts.get_font(GUIConstants.get_top_nav_title_font_name(), GUIConstants.get_top_nav_title_font_size())
+        (left, top, right, bottom) = title_font.getbbox(self.title)
+        icon_width = GUIConstants.ICON_FONT_SIZE + 4 + GUIConstants.COMPONENT_PADDING
+        if (right - left) + icon_width > Renderer.get_instance().canvas_width - 4:
+            self.title = self.fingerprint.split(" ")[0]
+
         super().__post_init__()
 
 

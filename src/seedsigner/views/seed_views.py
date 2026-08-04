@@ -26,8 +26,12 @@ logger = logging.getLogger(__name__)
 def get_seed_display_fingerprint(seed, seeds_list, network):
     """Return fingerprint with lineage notation if applicable.
 
-    Single parent: children show (sN), parent has no label.
-    Multiple parents: parents show (pN), children show (pN)(sN).
+    Single parent: children show (cN), parent has no label.
+    Multiple parents: parents show (pN), children show (pN)(cN).
+
+    N in (cN) is the seed's actual BIP-85 child index (0-based), NOT a
+    positional counter: labels must stay stable when siblings are discarded,
+    and must match the index needed to re-derive the child from its parent.
     """
     fp = seed.get_fingerprint(network)
 
@@ -51,17 +55,14 @@ def get_seed_display_fingerprint(seed, seeds_list, network):
 
     # If this seed HAS a parent still loaded, show lineage
     if seed.parent_fingerprint and seed.parent_fingerprint in parent_fps:
-        # Determine sibling order among children of the same parent
-        s_num = 0
-        for s in seeds_list:
-            if s.parent_fingerprint == seed.parent_fingerprint:
-                s_num += 1
-                if s is seed:
-                    break
+        # "c?" should be unreachable (the index is set wherever parent_fingerprint
+        # is), but never guess: a wrong index is a funds-recovery hazard
+        child_index = getattr(seed, "bip85_child_index", None)
+        c_label = f"c{child_index}" if child_index is not None else "c?"
         if multi_parent:
             p_num = parent_fps.index(seed.parent_fingerprint) + 1
-            return f"{fp} (p{p_num})(s{s_num})"
-        return f"{fp} (s{s_num})"
+            return f"{fp} (p{p_num})({c_label})"
+        return f"{fp} ({c_label})"
 
     return fp
 
@@ -1299,6 +1300,7 @@ class SeedWordsBackupTestPromptView(View):
                 ).split()
                 child_seed = Seed(mnemonic=child_mnemonic)
                 child_seed.parent_fingerprint = parent_seed.get_fingerprint(network)
+                child_seed.bip85_child_index = self.bip85_data["child_index"]
                 self.controller.storage.set_pending_seed(child_seed)
                 child_seed_num = self.controller.storage.finalize_pending_seed()
                 return Destination(SeedOptionsView, view_args=dict(seed_num=child_seed_num), clear_history=True)
@@ -1479,6 +1481,7 @@ class SeedWordsBackupTestSuccessView(View):
             ).split()
             child_seed = Seed(mnemonic=child_mnemonic)
             child_seed.parent_fingerprint = parent_seed.get_fingerprint(network)
+            child_seed.bip85_child_index = self.bip85_data["child_index"]
             self.controller.storage.set_pending_seed(child_seed)
             child_seed_num = self.controller.storage.finalize_pending_seed()
             return Destination(SeedOptionsView, view_args=dict(seed_num=child_seed_num), clear_history=True)

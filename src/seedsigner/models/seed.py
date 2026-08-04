@@ -33,6 +33,7 @@ class Seed:
         self.set_passphrase(passphrase, regenerate_seed=False)
 
         self._parent_fingerprint: str = None
+        self._bip85_child_index: int = None
 
         self.seed_bytes: bytes = None
         self._generate_seed()
@@ -102,6 +103,15 @@ class Seed:
     @parent_fingerprint.setter
     def parent_fingerprint(self, value: str):
         self._parent_fingerprint = value
+
+
+    @property
+    def bip85_child_index(self):
+        return self._bip85_child_index
+
+    @bip85_child_index.setter
+    def bip85_child_index(self, value: int):
+        self._bip85_child_index = value
 
 
     def set_passphrase(self, passphrase: str, regenerate_seed: bool = True):
