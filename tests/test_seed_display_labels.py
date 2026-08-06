@@ -94,3 +94,40 @@ class TestSeedDisplayLabels(BaseTest):
         parent = Seed(mnemonic=PARENT_A)
         child = make_child(parent, 3)
         assert label(child, [child]) == child.get_fingerprint(NETWORK)
+
+    def test_grandchild_stacks_chain(self):
+        # Child-of-a-child shows the full derivation path, and the middle
+        # seed is NOT promoted to a second parent
+        root = Seed(mnemonic=PARENT_A)
+        child = make_child(root, 1)
+        grandchild = make_child(child, 21)
+        seeds = [root, child, grandchild]
+
+        assert label(root, seeds) == root.get_fingerprint(NETWORK)  # single family: no (pN)
+        assert label(child, seeds) == f"{child.get_fingerprint(NETWORK)} (c1)"
+        assert label(grandchild, seeds) == f"{grandchild.get_fingerprint(NETWORK)} (c1)(c21)"
+
+    def test_grandchild_multi_family(self):
+        # Two independent root families: (pN) prefixes every chain
+        root_a = Seed(mnemonic=PARENT_A)
+        child_a = make_child(root_a, 1)
+        grandchild_a = make_child(child_a, 21)
+        root_b = Seed(mnemonic=PARENT_B)
+        child_b = make_child(root_b, 0)
+        seeds = [root_a, child_a, grandchild_a, root_b, child_b]
+
+        assert label(root_a, seeds) == f"{root_a.get_fingerprint(NETWORK)} (p1)"
+        assert label(grandchild_a, seeds) == f"{grandchild_a.get_fingerprint(NETWORK)} (p1)(c1)(c21)"
+        assert label(root_b, seeds) == f"{root_b.get_fingerprint(NETWORK)} (p2)"
+        assert label(child_b, seeds) == f"{child_b.get_fingerprint(NETWORK)} (p2)(c0)"
+
+    def test_discarded_middle_orphans_grandchild(self):
+        # Root and grandchild loaded but the middle seed discarded: the
+        # chain is unprovable, so no lineage is guessed
+        root = Seed(mnemonic=PARENT_A)
+        child = make_child(root, 1)
+        grandchild = make_child(child, 21)
+        seeds = [root, grandchild]  # child discarded
+
+        assert label(grandchild, seeds) == grandchild.get_fingerprint(NETWORK)
+        assert label(root, seeds) == root.get_fingerprint(NETWORK)

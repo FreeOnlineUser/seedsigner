@@ -37,48 +37,74 @@ def _format_child_index(index: int) -> str:
 
 
 def get_seed_display_fingerprint(seed, seeds_list, network):
-    """Return fingerprint with lineage notation if applicable.
+    """Return fingerprint with BIP-85 lineage notation if applicable.
 
-    Single parent: children show (cN), parent has no label.
-    Multiple parents: parents show (pN), children show (pN)(cN).
+    Descendants show their full derivation chain from their loaded root
+    ancestor: a child shows (cN), a child of that child shows (cN)(cM).
+    Every N is the seed's actual BIP-85 child index (0-based), NOT a
+    positional counter: labels must stay stable when siblings are discarded
+    and must match the indices needed to re-derive the chain. Indices over
+    6 digits are shown middle-elided (e.g. c21..47).
 
-    N in (cN) is the seed's actual BIP-85 child index (0-based), NOT a
-    positional counter: labels must stay stable when siblings are discarded,
-    and must match the index needed to re-derive the child from its parent.
-    Indices over 6 digits are shown middle-elided (e.g. c21..47).
+    Roots are tagged (pN), and chains prefixed with it, only when more than
+    one root family is loaded. A descendant whose intermediate ancestor is
+    no longer loaded shows a bare fingerprint: an unprovable lineage is
+    never guessed.
     """
     fp = seed.get_fingerprint(network)
 
-    # Build ordered list of unique parent fingerprints (only for parents still loaded)
-    parent_fps = []
+    seeds_by_fp = {}
     for s in seeds_list:
-        if s.parent_fingerprint and s.parent_fingerprint not in parent_fps:
-            for candidate in seeds_list:
-                if candidate.get_fingerprint(network) == s.parent_fingerprint:
-                    parent_fps.append(s.parent_fingerprint)
-                    break
+        seeds_by_fp[s.get_fingerprint(network)] = s
 
-    multi_parent = len(parent_fps) > 1
+    def lineage(s):
+        """Walk up to s's most distant loaded ancestor.
 
-    # If this seed IS a parent, show (pN) only when multiple parents exist
-    if fp in parent_fps:
-        if multi_parent:
-            p_num = parent_fps.index(fp) + 1
-            return f"{fp} (p{p_num})"
+        Returns (root ancestor, chain labels root-side first). No labels
+        means s has no loaded parent: it is a root or an orphan.
+        """
+        labels = []
+        cur = s
+        visited = {id(s)}
+        while cur.parent_fingerprint and cur.parent_fingerprint in seeds_by_fp:
+            parent = seeds_by_fp[cur.parent_fingerprint]
+            if id(parent) in visited:
+                # Defensive: only reachable via a fingerprint collision
+                break
+            visited.add(id(parent))
+            # "c?" should be unreachable (the index is set wherever
+            # parent_fingerprint is), but never guess: a wrong index is a
+            # funds-recovery hazard
+            child_index = getattr(cur, "bip85_child_index", None)
+            labels.append(f"c{_format_child_index(child_index)}" if child_index is not None else "c?")
+            cur = parent
+        labels.reverse()
+        return cur, labels
+
+    # Root families: fingerprints of loaded root ancestors with loaded descendants,
+    # ordered by first descendant appearance
+    root_fps = []
+    for s in seeds_list:
+        s_root, s_labels = lineage(s)
+        if s_labels:
+            s_root_fp = s_root.get_fingerprint(network)
+            if s_root_fp not in root_fps:
+                root_fps.append(s_root_fp)
+
+    multi_root = len(root_fps) > 1
+
+    root, labels = lineage(seed)
+    if not labels:
+        # A root of a loaded family, or an unrelated/orphaned seed
+        if multi_root and fp in root_fps:
+            return f"{fp} (p{root_fps.index(fp) + 1})"
         return fp
 
-    # If this seed HAS a parent still loaded, show lineage
-    if seed.parent_fingerprint and seed.parent_fingerprint in parent_fps:
-        # "c?" should be unreachable (the index is set wherever parent_fingerprint
-        # is), but never guess: a wrong index is a funds-recovery hazard
-        child_index = getattr(seed, "bip85_child_index", None)
-        c_label = f"c{_format_child_index(child_index)}" if child_index is not None else "c?"
-        if multi_parent:
-            p_num = parent_fps.index(seed.parent_fingerprint) + 1
-            return f"{fp} (p{p_num})({c_label})"
-        return f"{fp} ({c_label})"
-
-    return fp
+    chain = "".join(f"({label})" for label in labels)
+    if multi_root:
+        root_fp = root.get_fingerprint(network)
+        return f"{fp} (p{root_fps.index(root_fp) + 1}){chain}"
+    return f"{fp} {chain}"
 
 
 
