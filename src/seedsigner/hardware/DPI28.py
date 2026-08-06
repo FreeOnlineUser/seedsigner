@@ -85,18 +85,18 @@ class DPI28:
     _BACK = TouchBarIcons.BACK
     _SELECT = TouchBarIcons.CHECK
     _DEL = TouchBarIcons.DELETE
-    _WORD = TouchBarIcons.KEYBOARD
+    _WORD = TouchBarIcons.CHECK
 
     TOUCH_BAR_DEFAULT = ((_UP, _SELECT, _DOWN), ('#ff9416', '#ff9416', '#ff9416'), ('seedsigner', 'seedsigner', 'seedsigner'))
     TOUCH_BAR_UP_DISABLED = ((_UP, _SELECT, _DOWN), ('#444444', '#ff9416', '#ff9416'), ('seedsigner', 'seedsigner', 'seedsigner'))
     TOUCH_BAR_DOWN_DISABLED = ((_UP, _SELECT, _DOWN), ('#ff9416', '#ff9416', '#444444'), ('seedsigner', 'seedsigner', 'seedsigner'))
     TOUCH_BAR_SELECT_ONLY = (('', _SELECT, ''), ('#1a1a1a', '#ff9416', '#1a1a1a'), ('seedsigner', 'seedsigner', 'seedsigner'))
-    TOUCH_BAR_KEYBOARD = ((_DEL, _WORD, _DOWN), ('#444444', '#444444', '#ff9416'), ('seedsigner', 'fontawesome', 'seedsigner'))
-    TOUCH_BAR_KEYBOARD_DOWN_DISABLED = ((_DEL, _WORD, _DOWN), ('#444444', '#444444', '#444444'), ('seedsigner', 'fontawesome', 'seedsigner'))
-    TOUCH_BAR_KEYBOARD_WORD_ACTIVE = ((_DEL, _WORD, _DOWN), ('#444444', '#ff9416', '#ff9416'), ('seedsigner', 'fontawesome', 'seedsigner'))
-    TOUCH_BAR_KEYBOARD_DEL_ACTIVE = ((_DEL, _WORD, _DOWN), ('#ff9416', '#444444', '#ff9416'), ('seedsigner', 'fontawesome', 'seedsigner'))
-    TOUCH_BAR_KEYBOARD_BOTH_ACTIVE = ((_DEL, _WORD, _DOWN), ('#ff9416', '#ff9416', '#ff9416'), ('seedsigner', 'fontawesome', 'seedsigner'))
-    TOUCH_BAR_KEYBOARD_BOTH_ACTIVE_DOWN_DISABLED = ((_DEL, _WORD, _DOWN), ('#ff9416', '#ff9416', '#444444'), ('seedsigner', 'fontawesome', 'seedsigner'))
+    TOUCH_BAR_KEYBOARD = ((_DEL, _WORD, _DOWN), ('#444444', '#444444', '#ff9416'), ('seedsigner', 'seedsigner', 'seedsigner'))
+    TOUCH_BAR_KEYBOARD_DOWN_DISABLED = ((_DEL, _WORD, _DOWN), ('#444444', '#444444', '#444444'), ('seedsigner', 'seedsigner', 'seedsigner'))
+    TOUCH_BAR_KEYBOARD_WORD_ACTIVE = ((_DEL, _WORD, _DOWN), ('#444444', '#ff9416', '#ff9416'), ('seedsigner', 'seedsigner', 'seedsigner'))
+    TOUCH_BAR_KEYBOARD_DEL_ACTIVE = ((_DEL, _WORD, _DOWN), ('#ff9416', '#444444', '#ff9416'), ('seedsigner', 'seedsigner', 'seedsigner'))
+    TOUCH_BAR_KEYBOARD_BOTH_ACTIVE = ((_DEL, _WORD, _DOWN), ('#ff9416', '#ff9416', '#ff9416'), ('seedsigner', 'seedsigner', 'seedsigner'))
+    TOUCH_BAR_KEYBOARD_BOTH_ACTIVE_DOWN_DISABLED = ((_DEL, _WORD, _DOWN), ('#ff9416', '#ff9416', '#444444'), ('seedsigner', 'seedsigner', 'seedsigner'))
     TOUCH_BAR_HIDDEN = (('', '', ''), ('#1a1a1a', '#1a1a1a', '#1a1a1a'), ('seedsigner', 'seedsigner', 'seedsigner'))
     TOUCH_BAR_BACK = ((_BACK, '', ''), ('#ff9416', '#1a1a1a', '#1a1a1a'), ('seedsigner', 'seedsigner', 'seedsigner'))
     TOUCH_BAR_BACK_AND_OK = ((_BACK, '', _SELECT), ('#ff9416', '#1a1a1a', '#ff9416'), ('seedsigner', 'seedsigner', 'seedsigner'))
