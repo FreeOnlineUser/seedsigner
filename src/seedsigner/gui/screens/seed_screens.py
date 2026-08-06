@@ -610,7 +610,7 @@ class SeedMnemonicEntryT9Screen(BaseTopNavScreen):
         # Pre-calc word list if we have initial letters
         if len(self.letters) > 1 or (len(self.letters) == 1 and self.letters[0] != " "):
             self.calc_possible_alphabet()
-            self.t9_pad.update_active_letters(self.possible_alphabet)
+            self._update_pad_active_letters()
 
         self.matches_list_x = self.canvas_width - matches_list_button_width
         self.matches_list_y = self.top_nav.height
@@ -758,6 +758,19 @@ class SeedMnemonicEntryT9Screen(BaseTopNavScreen):
             from seedsigner.hardware.DPI28 import DPI28
             disp.display.set_touch_bar_labels(DPI28.TOUCH_BAR_DEFAULT)
 
+    def _update_pad_active_letters(self):
+        """
+        Update which letters the pad offers.
+
+        When the prefix narrows to a single word there is nothing left to
+        type: deactivate every letter so the dark pad itself signals that
+        selecting the word is the only move left.
+        """
+        if len(self.possible_words) == 1:
+            self.t9_pad.update_active_letters("")
+        else:
+            self.t9_pad.update_active_letters(self.possible_alphabet)
+
     def _commit_letter(self, letter: str):
         """Commit a letter: add to letters, recalc alphabet, update pad."""
         if self.letters[-1] == " ":
@@ -766,7 +779,7 @@ class SeedMnemonicEntryT9Screen(BaseTopNavScreen):
             self.letters.append(letter)
         self.letters.append(" ")
         self.calc_possible_alphabet()
-        self.t9_pad.update_active_letters(self.possible_alphabet)
+        self._update_pad_active_letters()
 
     def _delete_last(self):
         """Delete the last committed letter."""
@@ -778,7 +791,7 @@ class SeedMnemonicEntryT9Screen(BaseTopNavScreen):
         elif len(self.letters) == 1 and self.letters[0] != " ":
             self.letters = [" "]
         self.calc_possible_alphabet()
-        self.t9_pad.update_active_letters(self.possible_alphabet)
+        self._update_pad_active_letters()
 
     def _run(self):
         if hasattr(self.hw_inputs, 'clear_pending_input'):
