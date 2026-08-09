@@ -51,6 +51,11 @@ class Settings(Singleton):
             # Load default/persistent locale setting
             settings.load_locale()
 
+            # Sync smartcard sub-setting visibility with the persisted master gate
+            SettingsDefinition.update_smartcard_entry_visibility(
+                settings._data.get(SettingsConstants.SETTING__SMARTCARD_SUPPORT) == SettingsConstants.OPTION__ENABLED
+            )
+
         return cls._instance
 
 
@@ -208,6 +213,10 @@ class Settings(Singleton):
         # Special handling for localization
         if attr_name == SettingsConstants.SETTING__LOCALE:
             self.load_locale()
+
+        # Toggling the smartcard master gate shows/hides its sub-settings
+        if attr_name == SettingsConstants.SETTING__SMARTCARD_SUPPORT:
+            SettingsDefinition.update_smartcard_entry_visibility(value == SettingsConstants.OPTION__ENABLED)
 
 
     def get_value(self, attr_name: str, default_if_none: bool = None):

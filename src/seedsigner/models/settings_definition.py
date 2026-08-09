@@ -867,6 +867,7 @@ class SettingsDefinition:
                     abbreviated_name="pintries",
                     display_name=_mft("Smartcard PIN Attempts"),
                     type=SettingsConstants.TYPE__SELECT_1,
+                    visibility=SettingsConstants.VISIBILITY__ADVANCED,
                     selection_options=SettingsConstants.ALL_SCARD_PIN_ATTEMPTS,
                     default_value=SettingsConstants.DEFAULT_SCARD_PIN_ATTEMPTS),
 
@@ -1014,6 +1015,37 @@ class SettingsDefinition:
                       visibility=SettingsConstants.VISIBILITY__HIDDEN,
                       default_value=62),
     ]
+
+
+    # Smartcard sub-settings only appear in the menus while the master
+    # SETTING__SMARTCARD_SUPPORT gate is enabled; maps each to the visibility it
+    # has when shown.
+    SMARTCARD_SUB_ENTRY_VISIBILITY = {
+        SettingsConstants.SETTING__SATOCHIP_SUPPORT: SettingsConstants.VISIBILITY__ADVANCED,
+        SettingsConstants.SETTING__KEYCARD_SUPPORT: SettingsConstants.VISIBILITY__ADVANCED,
+        SettingsConstants.SETTING__SPECTER_DIY_SUPPORT: SettingsConstants.VISIBILITY__ADVANCED,
+        SettingsConstants.SETTING__SMARTCARD_INTERFACES: SettingsConstants.VISIBILITY__HARDWARE,
+        SettingsConstants.SETTING__SCARD_PIN_ATTEMPTS: SettingsConstants.VISIBILITY__ADVANCED,
+        SettingsConstants.SETTING__CACHE_SCARD_PIN: SettingsConstants.VISIBILITY__ADVANCED,
+        SettingsConstants.SETTING__SATOCHIP_SIGN_TIMEOUT: SettingsConstants.VISIBILITY__ADVANCED,
+        SettingsConstants.SETTING__SATOCHIP_MSG_SIGN_TIMEOUT: SettingsConstants.VISIBILITY__ADVANCED,
+        SettingsConstants.SETTING__SATOCHIP_MAX_PRE_DUMMIES: SettingsConstants.VISIBILITY__ADVANCED,
+        SettingsConstants.SETTING__SATOCHIP_MAX_POST_DUMMIES: SettingsConstants.VISIBILITY__ADVANCED,
+        SettingsConstants.SETTING__SATOCHIP_MAX_IN_TX_DUMMIES: SettingsConstants.VISIBILITY__ADVANCED,
+        SettingsConstants.SETTING__SATOCHIP_DUMMY_PROBABILITY: SettingsConstants.VISIBILITY__ADVANCED,
+        SettingsConstants.SETTING__KEYCARD_SIGN_TIMEOUT: SettingsConstants.VISIBILITY__ADVANCED,
+    }
+
+    @classmethod
+    def update_smartcard_entry_visibility(cls, is_smartcard_enabled: bool):
+        """
+            Shows/hides the smartcard sub-settings based on the master gate, following
+            the same runtime entry-mutation idiom as Settings.handle_microsd_state_change.
+            Hidden entries keep their stored values (see Settings.update).
+        """
+        for attr_name, shown_visibility in cls.SMARTCARD_SUB_ENTRY_VISIBILITY.items():
+            entry = cls.get_settings_entry(attr_name)
+            entry.visibility = shown_visibility if is_smartcard_enabled else SettingsConstants.VISIBILITY__HIDDEN
 
 
     @classmethod

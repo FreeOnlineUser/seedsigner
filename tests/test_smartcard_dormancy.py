@@ -72,3 +72,33 @@ class TestSmartcardDormancy(BaseTest):
         )
         button_data = capture_button_data(seed_views.LoadSeedView())
         assert seed_views.LoadSeedView.IMPORT_SEEDKEEPER in button_data
+
+    def test_smartcard_sub_settings_hidden_until_master_enabled(self):
+        from seedsigner.models.settings_definition import SettingsDefinition
+
+        # Master gate defaults to disabled: every smartcard sub-setting must be
+        # hidden from all settings menus.
+        for attr_name in SettingsDefinition.SMARTCARD_SUB_ENTRY_VISIBILITY:
+            assert (
+                SettingsDefinition.get_settings_entry(attr_name).visibility
+                == SettingsConstants.VISIBILITY__HIDDEN
+            ), f"{attr_name} visible while smartcard support disabled"
+
+        # Enabling the master gate restores each sub-setting's own visibility
+        self.settings.set_value(
+            SettingsConstants.SETTING__SMARTCARD_SUPPORT,
+            SettingsConstants.OPTION__ENABLED,
+        )
+        for attr_name, shown in SettingsDefinition.SMARTCARD_SUB_ENTRY_VISIBILITY.items():
+            assert SettingsDefinition.get_settings_entry(attr_name).visibility == shown
+
+        # And disabling hides them again
+        self.settings.set_value(
+            SettingsConstants.SETTING__SMARTCARD_SUPPORT,
+            SettingsConstants.OPTION__DISABLED,
+        )
+        for attr_name in SettingsDefinition.SMARTCARD_SUB_ENTRY_VISIBILITY:
+            assert (
+                SettingsDefinition.get_settings_entry(attr_name).visibility
+                == SettingsConstants.VISIBILITY__HIDDEN
+            )
