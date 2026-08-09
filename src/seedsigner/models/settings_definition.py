@@ -304,9 +304,11 @@ class SettingsConstants:
 
     KEYBOARD_MODE__STANDARD = "std"
     KEYBOARD_MODE__T9 = "t9"
+    KEYBOARD_MODE__T9_PREDICT = "t9p"
     ALL_KEYBOARD_MODES = [
         (KEYBOARD_MODE__STANDARD, _mft("Standard")),
         (KEYBOARD_MODE__T9, _mft("T9")),
+        (KEYBOARD_MODE__T9_PREDICT, _mft("T9 predict")),
     ]
 
     WORDLIST_LANGUAGE__ENGLISH = "en"

@@ -931,3 +931,39 @@ class T9Pad:
         self.selected_row = -1
         self.selected_col = -1
 
+    # --- Predictive ("best guess") mode helpers ---
+    # Pure functions: one tap per key, the wordlist disambiguates. Latin a-z only,
+    # same constraint as the multi-tap pad itself.
+
+    @classmethod
+    def word_to_key_seq(cls, word: str) -> List[int]:
+        """Map a word (or prefix) to its T9 key sequence, e.g. "zoo" -> [9, 6, 6]."""
+        seq = []
+        for ch in word:
+            for key, group in cls.T9_GROUPS.items():
+                if ch in group:
+                    seq.append(key)
+                    break
+            else:
+                raise ValueError(f"'{ch}' is not on the T9 pad")
+        return seq
+
+    @classmethod
+    def filter_words_by_key_seq(cls, wordlist: List[str], key_seq: List[int]) -> List[str]:
+        """
+        All words whose first len(key_seq) letters fall in the tapped key groups,
+        ranked shortest-first then alphabetical so exact-length matches surface
+        before longer completions ("act" before "action" for 2-2-8).
+        """
+        groups = [cls.T9_GROUPS[k] for k in key_seq]
+        matches = [
+            w for w in wordlist
+            if len(w) >= len(groups) and all(w[i] in g for i, g in enumerate(groups))
+        ]
+        return sorted(matches, key=lambda w: (len(w), w))
+
+    @staticmethod
+    def next_letters(words: List[str], position: int) -> str:
+        """The set of letters that appear at `position` across `words` (for key dimming)."""
+        return "".join(sorted({w[position] for w in words if len(w) > position}))
+

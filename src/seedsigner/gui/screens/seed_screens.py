@@ -549,9 +549,18 @@ class SeedMnemonicEntryScreen(BaseTopNavScreen):
 
 @dataclass
 class SeedMnemonicEntryT9Screen(BaseTopNavScreen):
-    """T9 multi-tap keyboard for seed word entry (touchscreen-optimized)."""
+    """
+    T9 keyboard for seed word entry (touchscreen-optimized).
+
+    Two modes:
+    * multi-tap (default): tap a key repeatedly to cycle its letters.
+    * predictive (`predictive=True`): one tap per key; candidates matching the
+      tapped key-group sequence rank in the side list and the entry line shows
+      the highlighted candidate's prefix. No cycling, no timeout.
+    """
     initial_letters: list = None
     wordlist: list = None
+    predictive: bool = False
 
     # T9 cycling timeout in milliseconds
     CYCLING_TIMEOUT_MS = 1000
@@ -608,8 +617,21 @@ class SeedMnemonicEntryT9Screen(BaseTopNavScreen):
         self.arrow_up_is_active = False
         self.arrow_down_is_active = False
 
+        # Predictive mode: the T9 keys tapped for the current word (the real state;
+        # self.letters just mirrors the highlighted candidate's prefix for display)
+        self.key_seq: list = []
+
         # Pre-calc word list if we have initial letters
-        if len(self.letters) > 1 or (len(self.letters) == 1 and self.letters[0] != " "):
+        if self.predictive:
+            initial_word = "".join(self.letters).strip()
+            if initial_word:
+                self.key_seq = T9Pad.word_to_key_seq(initial_word)
+                self._recalc_predictive()
+                if initial_word in self.possible_words:
+                    # Editing an existing word: highlight it, not the top guess
+                    self.selected_possible_words_index = self.possible_words.index(initial_word)
+                    self._sync_predictive_display()
+        elif len(self.letters) > 1 or (len(self.letters) == 1 and self.letters[0] != " "):
             self.calc_possible_alphabet()
             self._update_pad_active_letters()
 
@@ -794,6 +816,39 @@ class SeedMnemonicEntryT9Screen(BaseTopNavScreen):
         self.calc_possible_alphabet()
         self._update_pad_active_letters()
 
+    # --- Predictive ("best guess") mode ---
+
+    def _recalc_predictive(self):
+        """Recompute candidates, pad dimming, and display from the tapped keys."""
+        if not self.key_seq:
+            self.possible_words = []
+            self.selected_possible_words_index = 0
+            self.possible_alphabet = "abcdefghijklmnopqrstuvwxyz"
+        else:
+            self.possible_words = T9Pad.filter_words_by_key_seq(self.wordlist, self.key_seq)
+            self.selected_possible_words_index = 0
+            self.possible_alphabet = T9Pad.next_letters(self.possible_words, len(self.key_seq))
+        self._update_pad_active_letters()
+        self._sync_predictive_display()
+
+    def _sync_predictive_display(self):
+        """Mirror the highlighted candidate's prefix into the entry line."""
+        if self.possible_words:
+            prefix = self.possible_words[self.selected_possible_words_index][:len(self.key_seq)]
+            self.letters = list(prefix) + [" "]
+        else:
+            self.letters = [" "]
+        self.text_entry_display.cur_text = "".join(self.letters)
+
+    def _append_key(self, key_num: int):
+        self.key_seq.append(key_num)
+        self._recalc_predictive()
+
+    def _delete_last_key(self):
+        if self.key_seq:
+            self.key_seq.pop()
+        self._recalc_predictive()
+
     def _run(self):
         if hasattr(self.hw_inputs, 'clear_pending_input'):
             self.hw_inputs.clear_pending_input()
@@ -881,7 +936,9 @@ class SeedMnemonicEntryT9Screen(BaseTopNavScreen):
             if tapped_t9_key is not None:
                 with self.renderer.lock:
                     if tapped_t9_key == "DEL":
-                        if cycling:
+                        if self.predictive:
+                            self._delete_last_key()
+                        elif cycling:
                             self.t9_pad.cancel_cycling()
                             cycling = False
                         else:
@@ -895,6 +952,17 @@ class SeedMnemonicEntryT9Screen(BaseTopNavScreen):
                         continue
 
                     # Number key tapped
+                    if self.predictive:
+                        # Best-guess mode: one tap per key, the candidate list
+                        # disambiguates. No cycling, no timeout.
+                        self._append_key(tapped_t9_key)
+                        self.t9_pad.render_keys()
+                        self.text_entry_display.render()
+                        self.render_possible_matches()
+                        self._update_touch_bar()
+                        self.renderer.show_image()
+                        continue
+
                     if cycling and self.t9_pad.cycling_key != tapped_t9_key:
                         # Different key - commit current cycling letter first
                         committed = self.t9_pad.commit_cycling()
@@ -960,6 +1028,10 @@ class SeedMnemonicEntryT9Screen(BaseTopNavScreen):
             if up_arrow_tapped and self.possible_words:
                 self.selected_possible_words_index = max(0, self.selected_possible_words_index - 1)
                 with self.renderer.lock:
+                    if self.predictive:
+                        # Same keys, different letters: re-mirror the highlighted prefix
+                        self._sync_predictive_display()
+                        self.text_entry_display.render()
                     self.render_possible_matches()
                     self._update_touch_bar()
                     self.renderer.show_image()
@@ -970,6 +1042,9 @@ class SeedMnemonicEntryT9Screen(BaseTopNavScreen):
                 if self.possible_words:
                     self.selected_possible_words_index = min(len(self.possible_words) - 1, self.selected_possible_words_index + 1)
                     with self.renderer.lock:
+                        if self.predictive:
+                            self._sync_predictive_display()
+                            self.text_entry_display.render()
                         self.render_possible_matches()
                         self._update_touch_bar()
                         self.renderer.show_image()
@@ -977,7 +1052,9 @@ class SeedMnemonicEntryT9Screen(BaseTopNavScreen):
 
             # --- Handle DEL (KEY1 / touch bar) ---
             if input_key == HardwareButtonsConstants.KEY1:
-                if cycling:
+                if self.predictive:
+                    self._delete_last_key()
+                elif cycling:
                     self.t9_pad.cancel_cycling()
                     cycling = False
                 else:
