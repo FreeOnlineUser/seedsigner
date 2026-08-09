@@ -35,10 +35,19 @@ See also [SeedSigner/seedsigner-os#104](https://github.com/SeedSigner/seedsigner
   index and full lineage in the seed label (`(c1)(c21)` for a
   child-of-a-child), so a mislabeled child can't point at the wrong recovery
   path.
+- **Touch-operable camera flows.** Photo seed generation: tap the live preview
+  (or the touch bar shutter) to snap, then tap the left or right half of the
+  photo to reshoot or accept. QR scanning keeps tap-anywhere-to-cancel.
 - **SeedQR transcription QoL.** The zoomed transcription view pans toward
   wherever you tap, and the screensaver stays off while you copy.
 - Every BIP-39 word is provably reachable on the predictive keyboard: the test
   suite walks all 2048 words for dead ends (`tests/test_t9_predict.py`).
+
+## Releases
+
+Flash-ready SD card images are published under
+[Releases](https://github.com/FreeOnlineUser/seedsigner/releases), with a
+sha256 for each image in the release notes. Verify the hash after downloading.
 
 ## Building
 
@@ -46,10 +55,15 @@ Build as a normal [seedsigner-os](https://github.com/SeedSigner/seedsigner-os)
 buildroot image with this repo as the app source and the display files above in
 the boot partition. Nothing here requires a custom OS fork.
 
+Note: at boot the app reads `src/seedsigner/version.json`, which the current
+seedsigner-os build process generates. If your build pipeline doesn't, create
+it with `PYTHONPATH=src python3 tools/write_versionfile.py` before packing the
+image, or the splash screen will crash.
+
 ## Upstream
 
-Based on [jdlcdl/seedsigner](https://github.com/jdlcdl/seedsigner) (early
-BIP-85 groundwork). BIP-85 has since landed upstream; rebasing this work onto
-current `SeedSigner/seedsigner` dev is planned.
+A direct fork of [SeedSigner/seedsigner](https://github.com/SeedSigner/seedsigner),
+kept in sync with its `dev` branch (last merged August 2026). Early BIP-85
+groundwork came from jdlcdl's fork; BIP-85 has since landed upstream.
 
 License: MIT, same as upstream.
