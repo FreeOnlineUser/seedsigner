@@ -816,7 +816,6 @@ class SettingsDefinition:
         # Adjust defaults for touchscreen mode
         if os.environ.get('SEEDSIGNER_TOUCH') == '1':
             as_dict[SettingsConstants.SETTING__CAMERA_ROTATION] = SettingsConstants.CAMERA_ROTATION__90
-            as_dict[SettingsConstants.SETTING__KEYBOARD_MODE] = SettingsConstants.KEYBOARD_MODE__T9
 
         return as_dict
 
