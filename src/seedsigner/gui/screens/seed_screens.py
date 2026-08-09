@@ -1,5 +1,6 @@
 import logging
 import math
+import os
 import time
 
 from dataclasses import dataclass
@@ -1943,7 +1944,11 @@ class SeedTranscribeSeedQRZoomedInScreen(BaseScreen):
             width=1
         )
 
-        msg = _("click to exit")
+        if os.environ.get('SEEDSIGNER_TOUCH') == '1':
+            # Touch: taps pan toward the tap; exit is the touch bar / back corner.
+            msg = _("tap to move, bar to exit")
+        else:
+            msg = _("click to exit")
         font = Fonts.get_font(GUIConstants.get_body_font_name(), GUIConstants.get_body_font_size())
         (left, top, right, bottom) = font.getbbox(msg, anchor="ls")
         msg_height = -1 * top + GUIConstants.COMPONENT_PADDING
@@ -2025,8 +2030,18 @@ class SeedTranscribeSeedQRZoomedInScreen(BaseScreen):
 
 
     def _run(self):
+        # On the touchscreen, map taps to a pan direction relative to the centred
+        # cell (TouchButtons._coords_to_nav_key_center_relative) so a stray tap pans
+        # instead of exiting. Exit stays on the touch bar / top-left back corner.
+        nav_kwargs = {}
+        if os.environ.get('SEEDSIGNER_TOUCH') == '1':
+            nav_kwargs['nav_relative_center'] = True
+
         while True:
-            input = self.hw_inputs.wait_for(HardwareButtonsConstants.KEYS__LEFT_RIGHT_UP_DOWN + HardwareButtonsConstants.KEYS__ANYCLICK)
+            input = self.hw_inputs.wait_for(
+                HardwareButtonsConstants.KEYS__LEFT_RIGHT_UP_DOWN + HardwareButtonsConstants.KEYS__ANYCLICK,
+                **nav_kwargs,
+            )
 
             if input in HardwareButtonsConstants.KEYS__ANYCLICK:
                 # User clicked to exit

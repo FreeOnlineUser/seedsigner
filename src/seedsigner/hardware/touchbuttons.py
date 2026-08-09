@@ -310,7 +310,47 @@ class TouchButtons(Singleton):
         else:
             return self.KEY_PRESS
 
-    def wait_for(self, keys=[], check_release=True, release_keys=[], timeout_ms=0) -> int:
+    def _coords_to_nav_key_center_relative(self, x: int, y: int) -> int:
+        """
+        Map a tap to a pan direction relative to the screen centre, for full-screen
+        2D-pan screens (e.g. the SeedQR zoomed transcription view) where the focused
+        cell is always dead-centre.
+
+        The default d-pad mapping puts an exit (KEY_PRESS) block through the middle
+        and exit buttons along the touch bar, which pincer the DOWN target so stray
+        taps exit instead of pan. Here the whole UI area pans: direction is just the
+        dominant axis of the tap from centre, so a pan tap can never exit. Exit stays
+        on the touch bar (and the top-left back corner, handled in wait_for).
+
+        Args:
+            x, y: Touch coordinates in screen space (480x640)
+
+        Returns:
+            A KEY_* code, or -1 for a near-centre no-op (ignored by wait_for).
+        """
+        # Touch bar -> exit buttons, identical to the default mapping.
+        if y >= self.TOUCH_BAR_TOP:
+            third = self.SCREEN_WIDTH // 3
+            if x < third:
+                return self.KEY1
+            elif x < 2 * third:
+                return self.KEY2
+            else:
+                return self.KEY3
+
+        # UI area: pan toward the tap. A small central dead zone is a no-op so a tap
+        # on the centred cell itself doesn't jitter the view (0.15 is tunable).
+        dx = x - self.SCREEN_WIDTH / 2
+        dy = y - self.UI_HEIGHT / 2
+        dead_zone = self.UI_HEIGHT * 0.15
+        if abs(dx) < dead_zone and abs(dy) < dead_zone:
+            return -1
+
+        if abs(dx) > abs(dy):
+            return self.KEY_LEFT if dx < 0 else self.KEY_RIGHT
+        return self.KEY_UP if dy < 0 else self.KEY_DOWN
+
+    def wait_for(self, keys=[], check_release=True, release_keys=[], timeout_ms=0, nav_relative_center=False) -> int:
         """
         Wait for touch input matching requested keys.
 
@@ -410,7 +450,10 @@ class TouchButtons(Singleton):
                             continue
 
                     # Fall back to navigation key mapping
-                    key = self._coords_to_nav_key(x, y)
+                    if nav_relative_center:
+                        key = self._coords_to_nav_key_center_relative(x, y)
+                    else:
+                        key = self._coords_to_nav_key(x, y)
                     logger.debug(f"Nav key: {key}, in keys: {key in keys}")
 
                     # Track if touch bar BACK (left button) was tapped

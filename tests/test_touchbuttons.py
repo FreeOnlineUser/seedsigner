@@ -307,3 +307,73 @@ class TestGetButtonsFactory:
             with patch.dict(sys.modules, {'seedsigner.hardware.buttons': mock_hw_buttons}):
                 buttons = get_buttons()
                 assert not isinstance(buttons, TouchButtons)
+
+
+class TestCoordsToNavKeyCenterRelative:
+    """Test _coords_to_nav_key_center_relative(): the 2D-pan mapping used by the
+    SeedQR zoomed transcription screen. The whole UI area pans toward the tap, so
+    a pan tap can never land on an exit -- exit stays on the touch bar only. This
+    fixes the DOWN-taps-exit bug caused by the default mapping's central KEY_PRESS
+    exit block pincered against the touch bar."""
+
+    def _make_buttons(self):
+        TouchButtons._instance = None
+        return TouchButtons.get_instance()
+
+    # --- UI area pans by dominant axis from centre (240, 240) ---
+
+    def test_bottom_center_is_down(self):
+        """Bottom-centre tap pans DOWN (the reported failure case)."""
+        tb = self._make_buttons()
+        assert tb._coords_to_nav_key_center_relative(240, 400) == tb.KEY_DOWN
+
+    def test_just_below_centre_is_down_not_exit(self):
+        """A tap just below the centred cell pans DOWN. In the old mapping this
+        band was a KEY_PRESS exit; it must no longer exit."""
+        tb = self._make_buttons()
+        assert tb._coords_to_nav_key_center_relative(240, 330) == tb.KEY_DOWN
+
+    def test_top_center_is_up(self):
+        tb = self._make_buttons()
+        assert tb._coords_to_nav_key_center_relative(240, 80) == tb.KEY_UP
+
+    def test_left_is_left(self):
+        tb = self._make_buttons()
+        assert tb._coords_to_nav_key_center_relative(60, 240) == tb.KEY_LEFT
+
+    def test_right_is_right(self):
+        tb = self._make_buttons()
+        assert tb._coords_to_nav_key_center_relative(420, 240) == tb.KEY_RIGHT
+
+    def test_diagonal_resolves_to_dominant_axis(self):
+        """More vertical than horizontal -> vertical wins."""
+        tb = self._make_buttons()
+        assert tb._coords_to_nav_key_center_relative(300, 420) == tb.KEY_DOWN
+
+    # --- The centre no longer exits (anti-regression for the pincer bug) ---
+
+    def test_dead_centre_is_noop_not_exit(self):
+        """Dead-centre tap is a no-op (-1), NOT an exit. -1 is not in any screen's
+        requested keys, so wait_for ignores it."""
+        tb = self._make_buttons()
+        key = tb._coords_to_nav_key_center_relative(240, 240)
+        assert key == -1
+        assert key not in HardwareButtonsConstants.KEYS__ANYCLICK
+
+    def test_old_center_press_point_is_now_noop(self):
+        """(240, 200) returned KEY_PRESS (exit) under the default mapping; under the
+        pan mapping it is inside the dead zone -> no-op, never an exit."""
+        tb = self._make_buttons()
+        assert tb._coords_to_nav_key(240, 200) == tb.KEY_PRESS  # old behaviour
+        assert tb._coords_to_nav_key_center_relative(240, 200) == -1  # new behaviour
+
+    # --- Exit still works via the touch bar ---
+
+    def test_touch_bar_still_exits(self):
+        """Touch bar taps still return KEY1/KEY2/KEY3 (all ANYCLICK = exit)."""
+        tb = self._make_buttons()
+        assert tb._coords_to_nav_key_center_relative(80, 560) == tb.KEY1
+        assert tb._coords_to_nav_key_center_relative(240, 560) == tb.KEY2
+        assert tb._coords_to_nav_key_center_relative(400, 560) == tb.KEY3
+        for k in (tb.KEY1, tb.KEY2, tb.KEY3):
+            assert k in HardwareButtonsConstants.KEYS__ANYCLICK
