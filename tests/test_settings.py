@@ -114,7 +114,8 @@ class SettingsQRBase(BaseTest):
         self.settingsqr_default_attrs_str = ""
         for abbreviated_attr_name, value in settingsqr_dict.items():
             if isinstance(value, list):
-                value_str = ",".join(value)
+                # Multiselect values may be non-str (e.g. seed word lengths are ints)
+                value_str = ",".join(str(v) for v in value)
             else:
                 value_str = str(value)
             self.settingsqr_default_attrs_str += f" {abbreviated_attr_name}={value_str}"

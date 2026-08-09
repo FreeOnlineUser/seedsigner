@@ -316,6 +316,96 @@ class SettingsConstants:
         (KEYBOARD_MODE__T9_PREDICT, _mft("T9 predict")),
     ]
 
+    #Smartcard Related Constants
+    SMARTCARD_INTERFACE_USB = "usb"
+    SMARTCARD_INTERFACE_PN532 = "pn532"
+    SMARTCARD_INTERFACE_SEC1210 = "sec1210"
+    SMARTCARD_INTERFACE_PHOENIX = "phoenix-usb"
+    ALL_SMARTCARD_INTERFACES = [
+        (SMARTCARD_INTERFACE_USB, "USB PC/SC Reader"),
+        (SMARTCARD_INTERFACE_PN532, "PN532 via GPIO"),
+        (SMARTCARD_INTERFACE_SEC1210, "SEC1210 via GPIO"),
+        (SMARTCARD_INTERFACE_PHOENIX, "Phoenix via USB")
+    ]
+
+    # Smartcard PIN attempt limits
+    SCARD_PIN_ATTEMPTS_MIN = 2
+    SCARD_PIN_ATTEMPTS_MAX = 10
+    ALL_SCARD_PIN_ATTEMPTS = [(i, str(i)) for i in range(SCARD_PIN_ATTEMPTS_MIN, SCARD_PIN_ATTEMPTS_MAX + 1)]
+    DEFAULT_SCARD_PIN_ATTEMPTS = 5
+
+    # Satochip signing behavior
+    SATOCHIP_TIMEOUT_MIN = 0.25
+    SATOCHIP_TIMEOUT_MAX = 1
+
+    ALL_SATOCHIP_TIMEOUTS = [
+        (i, f"{i:g}s")
+        for i in [x * 0.25 for x in range(int(SATOCHIP_TIMEOUT_MIN / 0.25), int(SATOCHIP_TIMEOUT_MAX / 0.25) + 1)]
+    ]
+    DEFAULT_SATOCHIP_TIMEOUT = 0.5
+
+    SATOCHIP_MSG_TIMEOUT_MIN = 0.5
+    SATOCHIP_MSG_TIMEOUT_MAX = 2
+
+    ALL_SATOCHIP_MSG_TIMEOUTS = [
+        (i / 4, f"{i / 4:g}s")
+        for i in range(int(SATOCHIP_MSG_TIMEOUT_MIN * 4), int(SATOCHIP_MSG_TIMEOUT_MAX * 4) + 1)
+    ]
+    DEFAULT_SATOCHIP_MSG_TIMEOUT = 1.25
+
+    SATOCHIP_PRE_DUMMY_MAX_MIN = 0
+    SATOCHIP_PRE_DUMMY_MAX_MAX = 12
+    ALL_SATOCHIP_PRE_DUMMY_MAX = [
+        (i, str(i))
+        for i in range(SATOCHIP_PRE_DUMMY_MAX_MIN, SATOCHIP_PRE_DUMMY_MAX_MAX + 1)
+    ]
+    DEFAULT_SATOCHIP_PRE_DUMMY_MAX = 6
+
+    SATOCHIP_POST_DUMMY_MAX_MIN = 0
+    SATOCHIP_POST_DUMMY_MAX_MAX = 12
+    ALL_SATOCHIP_POST_DUMMY_MAX = [
+        (i, str(i))
+        for i in range(
+            SATOCHIP_POST_DUMMY_MAX_MIN, SATOCHIP_POST_DUMMY_MAX_MAX + 1
+        )
+    ]
+    DEFAULT_SATOCHIP_POST_DUMMY_MAX = 6
+
+    SATOCHIP_IN_TX_DUMMY_MAX_MIN = 1
+    SATOCHIP_IN_TX_DUMMY_MAX_MAX = 5
+    ALL_SATOCHIP_IN_TX_DUMMY_MAX = [
+        (i, str(i))
+        for i in range(SATOCHIP_IN_TX_DUMMY_MAX_MIN, SATOCHIP_IN_TX_DUMMY_MAX_MAX + 1)
+    ]
+    DEFAULT_SATOCHIP_IN_TX_DUMMY_MAX = 3
+
+    SATOCHIP_DUMMY_PROB_MIN = 0
+    SATOCHIP_DUMMY_PROB_MAX = 100
+    ALL_SATOCHIP_DUMMY_PROB = [
+        (i, f"{i}%") for i in range(SATOCHIP_DUMMY_PROB_MIN, SATOCHIP_DUMMY_PROB_MAX + 1, 5)
+    ]
+    DEFAULT_SATOCHIP_DUMMY_PROB = 50
+
+    # Keycard signing behavior
+    # Keycard operations (derive_key + sign) are slower than native Satochip
+    # signing, so the timeout is adjustable in 0.75s steps around a 2.25s default.
+    KEYCARD_TIMEOUT_MIN = 0.75
+    KEYCARD_TIMEOUT_MAX = 3.75
+    ALL_KEYCARD_TIMEOUTS = [
+        (i / 4, f"{i / 4:g}s")
+        for i in range(int(KEYCARD_TIMEOUT_MIN * 4), int(KEYCARD_TIMEOUT_MAX * 4) + 1, 3)
+    ]
+    DEFAULT_KEYCARD_TIMEOUT = 2.25
+
+    ALL_SEED_WORD_LENGTHS = [
+        (12, "12 words"),
+        (15, "15 words"),
+        (18, "18 words"),
+        (21, "21 words"),
+        (24, "24 words"),
+    ]
+
+
     WORDLIST_LANGUAGE__ENGLISH = "en"
     WORDLIST_LANGUAGE__CHINESE_SIMPLIFIED = "zh_Hans_CN"
     WORDLIST_LANGUAGE__CHINESE_TRADITIONAL = "zh_Hant_TW"
@@ -363,6 +453,22 @@ class SettingsConstants:
     SETTING__PARTNER_LOGOS = "partner_logos"
     SETTING__MICROSD_TOAST_TIMER = "microsd_toast_timer"
     SETTING__KEYBOARD_MODE = "keyboard_mode"
+    SETTING__SEED_WORD_LENGTHS = "seed_word_lengths"
+    SETTING__ACCOUNT_PROMPT = "account_prompt"
+    SETTING__SMARTCARD_SUPPORT = "smartcard_support"
+    SETTING__SATOCHIP_SUPPORT = "satochip_support"
+    SETTING__KEYCARD_SUPPORT = "keycard_support"
+    SETTING__SPECTER_DIY_SUPPORT = "specter_diy_support"
+    SETTING__SMARTCARD_INTERFACES = "smartcard_interfaces"
+    SETTING__SCARD_PIN_ATTEMPTS = "scard_pin_attempts"
+    SETTING__CACHE_SCARD_PIN = "cache_scard_pin"
+    SETTING__SATOCHIP_SIGN_TIMEOUT = "satochip_sign_timeout"
+    SETTING__SATOCHIP_MSG_SIGN_TIMEOUT = "satochip_msg_sign_timeout"
+    SETTING__SATOCHIP_MAX_PRE_DUMMIES = "satochip_max_pre_dummies"
+    SETTING__SATOCHIP_MAX_POST_DUMMIES = "satochip_max_post_dummies"
+    SETTING__SATOCHIP_MAX_IN_TX_DUMMIES = "satochip_max_in_tx_dummies"
+    SETTING__SATOCHIP_DUMMY_PROBABILITY = "satochip_dummy_probability"
+    SETTING__KEYCARD_SIGN_TIMEOUT = "keycard_sign_timeout"
 
     SETTING__DEBUG = "debug"
 
@@ -703,6 +809,138 @@ class SettingsDefinition:
                       visibility=SettingsConstants.VISIBILITY__ADVANCED,
                       selection_options=SettingsConstants.ALL_KEYBOARD_MODES,
                       default_value=SettingsConstants.KEYBOARD_MODE__T9_PREDICT),
+
+        SettingsEntry(category=SettingsConstants.CATEGORY__FEATURES,
+                      attr_name=SettingsConstants.SETTING__SEED_WORD_LENGTHS,
+                      abbreviated_name="seedlen",
+                      display_name=_mft("Seed word lengths"),
+                      type=SettingsConstants.TYPE__MULTISELECT,
+                      visibility=SettingsConstants.VISIBILITY__ADVANCED,
+                      selection_options=SettingsConstants.ALL_SEED_WORD_LENGTHS,
+                      default_value=[12, 24]),
+
+        SettingsEntry(category=SettingsConstants.CATEGORY__FEATURES,
+                      attr_name=SettingsConstants.SETTING__ACCOUNT_PROMPT,
+                      display_name=_mft("BIP32 account prompt"),
+                      visibility=SettingsConstants.VISIBILITY__ADVANCED,
+                      default_value=SettingsConstants.OPTION__DISABLED),
+
+        SettingsEntry(category=SettingsConstants.CATEGORY__FEATURES,
+                      attr_name=SettingsConstants.SETTING__SMARTCARD_SUPPORT,
+                      abbreviated_name="smartcard",
+                      display_name=_mft("Smartcard support"),
+                      visibility=SettingsConstants.VISIBILITY__ADVANCED,
+                      default_value=SettingsConstants.OPTION__DISABLED),
+
+        SettingsEntry(category=SettingsConstants.CATEGORY__FEATURES,
+                  attr_name=SettingsConstants.SETTING__SATOCHIP_SUPPORT,
+                  abbreviated_name="satochip",
+                  display_name=_mft("Satochip support"),
+                  visibility=SettingsConstants.VISIBILITY__ADVANCED,
+                  default_value=SettingsConstants.OPTION__ENABLED),
+
+        SettingsEntry(category=SettingsConstants.CATEGORY__FEATURES,
+                  attr_name=SettingsConstants.SETTING__KEYCARD_SUPPORT,
+                  abbreviated_name="keycard",
+                  display_name=_mft("KeyCard support"),
+                  visibility=SettingsConstants.VISIBILITY__ADVANCED,
+                  default_value=SettingsConstants.OPTION__DISABLED),
+
+        SettingsEntry(category=SettingsConstants.CATEGORY__FEATURES,
+                  attr_name=SettingsConstants.SETTING__SPECTER_DIY_SUPPORT,
+                  abbreviated_name="specter_diy",
+                  display_name=_mft("Specter-DIY support"),
+                  visibility=SettingsConstants.VISIBILITY__ADVANCED,
+                  default_value=SettingsConstants.OPTION__DISABLED),
+
+        SettingsEntry(category=SettingsConstants.CATEGORY__SYSTEM,
+                    attr_name=SettingsConstants.SETTING__SMARTCARD_INTERFACES,
+                    abbreviated_name="screaders",
+                    display_name="Smartcard Interfaces",
+                    type=SettingsConstants.TYPE__MULTISELECT,
+                    visibility=SettingsConstants.VISIBILITY__HARDWARE,
+                    selection_options=SettingsConstants.ALL_SMARTCARD_INTERFACES,
+                    default_value=[SettingsConstants.SMARTCARD_INTERFACE_USB]),
+
+        SettingsEntry(category=SettingsConstants.CATEGORY__SYSTEM,
+                    attr_name=SettingsConstants.SETTING__SCARD_PIN_ATTEMPTS,
+                    abbreviated_name="pintries",
+                    display_name=_mft("Smartcard PIN Attempts"),
+                    type=SettingsConstants.TYPE__SELECT_1,
+                    selection_options=SettingsConstants.ALL_SCARD_PIN_ATTEMPTS,
+                    default_value=SettingsConstants.DEFAULT_SCARD_PIN_ATTEMPTS),
+
+        SettingsEntry(category=SettingsConstants.CATEGORY__SYSTEM,
+                    attr_name=SettingsConstants.SETTING__CACHE_SCARD_PIN,
+                    abbreviated_name="cachepin",
+                    display_name="Cache Smartcard Pin",
+                    type=SettingsConstants.TYPE__SELECT_1,
+                    visibility=SettingsConstants.VISIBILITY__ADVANCED,
+                    selection_options=SettingsConstants.OPTIONS__ENABLED_DISABLED,
+                    default_value=SettingsConstants.OPTION__DISABLED),
+
+        SettingsEntry(category=SettingsConstants.CATEGORY__FEATURES,
+                      attr_name=SettingsConstants.SETTING__SATOCHIP_SIGN_TIMEOUT,
+                      abbreviated_name="satotime",
+                      display_name="Satochip tx sign timeout",
+                      type=SettingsConstants.TYPE__SELECT_1,
+                      visibility=SettingsConstants.VISIBILITY__ADVANCED,
+                      selection_options=SettingsConstants.ALL_SATOCHIP_TIMEOUTS,
+                      default_value=SettingsConstants.DEFAULT_SATOCHIP_TIMEOUT),
+
+        SettingsEntry(category=SettingsConstants.CATEGORY__FEATURES,
+                      attr_name=SettingsConstants.SETTING__SATOCHIP_MSG_SIGN_TIMEOUT,
+                      abbreviated_name="satomsig",
+                      display_name="Satochip message sign timeout",
+                      type=SettingsConstants.TYPE__SELECT_1,
+                      visibility=SettingsConstants.VISIBILITY__ADVANCED,
+                      selection_options=SettingsConstants.ALL_SATOCHIP_MSG_TIMEOUTS,
+                      default_value=SettingsConstants.DEFAULT_SATOCHIP_MSG_TIMEOUT),
+
+        SettingsEntry(category=SettingsConstants.CATEGORY__FEATURES,
+                      attr_name=SettingsConstants.SETTING__SATOCHIP_MAX_PRE_DUMMIES,
+                      abbreviated_name="satopre",
+                      display_name="Satochip pre-sign dummies",
+                      type=SettingsConstants.TYPE__SELECT_1,
+                      visibility=SettingsConstants.VISIBILITY__ADVANCED,
+                      selection_options=SettingsConstants.ALL_SATOCHIP_PRE_DUMMY_MAX,
+                      default_value=SettingsConstants.DEFAULT_SATOCHIP_PRE_DUMMY_MAX),
+
+        SettingsEntry(category=SettingsConstants.CATEGORY__FEATURES,
+                      attr_name=SettingsConstants.SETTING__SATOCHIP_MAX_POST_DUMMIES,
+                      abbreviated_name="satopost",
+                      display_name="Satochip post-sign dummies",
+                      type=SettingsConstants.TYPE__SELECT_1,
+                      visibility=SettingsConstants.VISIBILITY__ADVANCED,
+                      selection_options=SettingsConstants.ALL_SATOCHIP_POST_DUMMY_MAX,
+                      default_value=SettingsConstants.DEFAULT_SATOCHIP_POST_DUMMY_MAX),
+
+        SettingsEntry(category=SettingsConstants.CATEGORY__FEATURES,
+                      attr_name=SettingsConstants.SETTING__SATOCHIP_MAX_IN_TX_DUMMIES,
+                      abbreviated_name="satointx",
+                      display_name="Satochip in-tx dummies",
+                      type=SettingsConstants.TYPE__SELECT_1,
+                      visibility=SettingsConstants.VISIBILITY__ADVANCED,
+                      selection_options=SettingsConstants.ALL_SATOCHIP_IN_TX_DUMMY_MAX,
+                      default_value=SettingsConstants.DEFAULT_SATOCHIP_IN_TX_DUMMY_MAX),
+
+        SettingsEntry(category=SettingsConstants.CATEGORY__FEATURES,
+                      attr_name=SettingsConstants.SETTING__SATOCHIP_DUMMY_PROBABILITY,
+                      abbreviated_name="satoprob",
+                      display_name="Satochip dummy prob",
+                      type=SettingsConstants.TYPE__SELECT_1,
+                      visibility=SettingsConstants.VISIBILITY__ADVANCED,
+                      selection_options=SettingsConstants.ALL_SATOCHIP_DUMMY_PROB,
+                      default_value=SettingsConstants.DEFAULT_SATOCHIP_DUMMY_PROB),
+
+        SettingsEntry(category=SettingsConstants.CATEGORY__FEATURES,
+                      attr_name=SettingsConstants.SETTING__KEYCARD_SIGN_TIMEOUT,
+                      abbreviated_name="keycardtime",
+                      display_name="Keycard sign timeout",
+                      type=SettingsConstants.TYPE__SELECT_1,
+                      visibility=SettingsConstants.VISIBILITY__ADVANCED,
+                      selection_options=SettingsConstants.ALL_KEYCARD_TIMEOUTS,
+                      default_value=SettingsConstants.DEFAULT_KEYCARD_TIMEOUT),
 
         SettingsEntry(category=SettingsConstants.CATEGORY__FEATURES,
                       attr_name=SettingsConstants.SETTING__MESSAGE_SIGNING,

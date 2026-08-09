@@ -2467,3 +2467,19 @@ class SeedSignMessageConfirmAddressScreen(ButtonListScreen):
             screen_y=derivation_path_display.screen_y + derivation_path_display.height + 2*GUIConstants.COMPONENT_PADDING,
         )
         self.components.append(address_display)
+
+
+
+@dataclass
+class SeedExportXpubAccountNumberScreen(KeyboardScreen):
+    def __post_init__(self):
+        self.title = _("Account Number")
+        self.user_input = "0"
+
+        # Specify the keys in the keyboard
+        self.rows = 3
+        self.cols = 5
+        self.keys_charset = "0123456789"
+        self.show_save_button = True
+
+        super().__post_init__()

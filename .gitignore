@@ -1,6 +1,9 @@
 .DS_Store
 __pycache__/
 src/seedsigner.egg-info/
+# Desktop-mode stand-in for the microSD (created by MicroSD.get_microsd_dir();
+# may hold PSBTs and must never be committed)
+/microsd/
 .nova
 .vscode
 src/seedsigner/version.json

@@ -1,18 +1,20 @@
+import math
 import os
 import time
+import unicodedata
 
 from dataclasses import dataclass
 from gettext import gettext as _
-from typing import Any
+from typing import Any, List
 from PIL.Image import Image
 from seedsigner.gui.renderer import Renderer
 from seedsigner.hardware.camera import Camera
-from seedsigner.gui.components import FontAwesomeIconConstants, Fonts, GUIConstants, IconTextLine, SeedSignerIconConstants, TextArea
+from seedsigner.gui.components import CheckboxButton, FontAwesomeIconConstants, Fonts, GUIConstants, IconButton, IconTextLine, SeedSignerIconConstants, TextArea
 
-from seedsigner.gui.screens.screen import RET_CODE__BACK_BUTTON, BaseScreen, ButtonListScreen, ButtonOption, KeyboardScreen
+from seedsigner.gui.screens.screen import RET_CODE__BACK_BUTTON, BaseScreen, BaseTopNavScreen, ButtonListScreen, ButtonOption, KeyboardScreen
 from seedsigner.hardware.buttons import HardwareButtonsConstants
 from seedsigner.models.settings_definition import SettingsConstants, SettingsDefinition
-from seedsigner.gui.keyboard import Keyboard
+from seedsigner.gui.keyboard import Keyboard, TextEntryDisplay
 
 
 
@@ -775,3 +777,535 @@ class ToolsAddressExplorerAddressListScreen(ButtonListScreen):
         self.button_data.append(ButtonOption(button_label, right_icon_name=SeedSignerIconConstants.CHEVRON_RIGHT))
 
         super().__post_init__()
+
+
+@dataclass
+class ToolsCommonFilterScreen(ButtonListScreen):
+    checked_buttons: List[int] = None
+
+    def __post_init__(self):
+        self.title = _("Device Filter")
+        self.is_bottom_list = True
+        self.is_button_text_centered = False
+        self.Button_cls = CheckboxButton
+        super().__post_init__()
+
+
+@dataclass
+class ToolsTextQRTextEntryScreen(BaseTopNavScreen):
+    textToEncode: str = ""
+
+    # Only used by the screenshot generator
+    initial_keyboard: str = None
+
+    KEYBOARD__LOWERCASE_BUTTON_TEXT = "abc"
+    KEYBOARD__UPPERCASE_BUTTON_TEXT = "ABC"
+    KEYBOARD__DIGITS_BUTTON_TEXT = "123"
+    KEYBOARD__SYMBOLS_1_BUTTON_TEXT = "!@#"
+    KEYBOARD__SYMBOLS_2_BUTTON_TEXT = "*[]"
+
+
+    def __post_init__(self):
+        if not self.title:
+            self.title = _("Text to Encode")
+
+        super().__post_init__()
+
+        keys_lower = "abcdefghijklmnopqrstuvwxyz"
+        keys_upper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        keys_number = "0123456789"
+
+        # Present the most common/puncutation-related symbols & the most human-friendly
+        #   symbols first (limited to 18 chars).
+        keys_symbol_1 = """!@#$%&();:,.-+='"?"""
+
+        # Isolate the more math-oriented or just uncommon symbols
+        keys_symbol_2 = """^*[]{}_\\|<>/`~"""
+
+
+        # Set up the keyboard params
+        self.right_panel_buttons_width = 56
+
+        max_cols = 9
+        text_entry_display_y = self.top_nav.height
+        text_entry_display_height = 30
+
+        keyboard_start_y = text_entry_display_y + text_entry_display_height + GUIConstants.COMPONENT_PADDING
+        self.keyboard_abc = Keyboard(
+            draw=self.renderer.draw,
+            charset=keys_lower,
+            rows=4,
+            cols=max_cols,
+            rect=(
+                GUIConstants.COMPONENT_PADDING,
+                keyboard_start_y,
+                self.canvas_width - GUIConstants.COMPONENT_PADDING - self.right_panel_buttons_width,
+                self.canvas_height - GUIConstants.EDGE_PADDING
+            ),
+            additional_keys=[
+                Keyboard.KEY_SPACE_5,
+                Keyboard.KEY_CURSOR_LEFT,
+                Keyboard.KEY_CURSOR_RIGHT,
+                Keyboard.KEY_BACKSPACE
+            ],
+            auto_wrap=[Keyboard.WRAP_LEFT, Keyboard.WRAP_RIGHT]
+        )
+
+        self.keyboard_ABC = Keyboard(
+            draw=self.renderer.draw,
+            charset=keys_upper,
+            rows=4,
+            cols=max_cols,
+            rect=(
+                GUIConstants.COMPONENT_PADDING,
+                keyboard_start_y,
+                self.canvas_width - GUIConstants.COMPONENT_PADDING - self.right_panel_buttons_width,
+                self.canvas_height - GUIConstants.EDGE_PADDING
+            ),
+            additional_keys=[
+                Keyboard.KEY_SPACE_5,
+                Keyboard.KEY_CURSOR_LEFT,
+                Keyboard.KEY_CURSOR_RIGHT,
+                Keyboard.KEY_BACKSPACE
+            ],
+            auto_wrap=[Keyboard.WRAP_LEFT, Keyboard.WRAP_RIGHT],
+            render_now=False
+        )
+
+        self.keyboard_digits = Keyboard(
+            draw=self.renderer.draw,
+            charset=keys_number,
+            rows=3,
+            cols=5,
+            rect=(
+                GUIConstants.COMPONENT_PADDING,
+                keyboard_start_y,
+                self.canvas_width - GUIConstants.COMPONENT_PADDING - self.right_panel_buttons_width,
+                self.canvas_height - GUIConstants.EDGE_PADDING
+            ),
+            additional_keys=[
+                Keyboard.KEY_CURSOR_LEFT,
+                Keyboard.KEY_CURSOR_RIGHT,
+                Keyboard.KEY_BACKSPACE
+            ],
+            auto_wrap=[Keyboard.WRAP_LEFT, Keyboard.WRAP_RIGHT],
+            render_now=False
+        )
+
+        self.keyboard_symbols_1 = Keyboard(
+            draw=self.renderer.draw,
+            charset=keys_symbol_1,
+            rows=4,
+            cols=6,
+            rect=(
+                GUIConstants.COMPONENT_PADDING,
+                keyboard_start_y,
+                self.canvas_width - GUIConstants.COMPONENT_PADDING - self.right_panel_buttons_width,
+                self.canvas_height - GUIConstants.EDGE_PADDING
+            ),
+            additional_keys=[
+                Keyboard.KEY_SPACE_2,
+                Keyboard.KEY_CURSOR_LEFT,
+                Keyboard.KEY_CURSOR_RIGHT,
+                Keyboard.KEY_BACKSPACE
+            ],
+            auto_wrap=[Keyboard.WRAP_LEFT, Keyboard.WRAP_RIGHT],
+            render_now=False
+        )
+
+        self.keyboard_symbols_2 = Keyboard(
+            draw=self.renderer.draw,
+            charset=keys_symbol_2,
+            rows=4,
+            cols=6,
+            rect=(
+                GUIConstants.COMPONENT_PADDING,
+                keyboard_start_y,
+                self.canvas_width - GUIConstants.COMPONENT_PADDING - self.right_panel_buttons_width,
+                self.canvas_height - GUIConstants.EDGE_PADDING
+            ),
+            additional_keys=[
+                Keyboard.KEY_SPACE_2,
+                Keyboard.KEY_CURSOR_LEFT,
+                Keyboard.KEY_CURSOR_RIGHT,
+                Keyboard.KEY_BACKSPACE
+            ],
+            auto_wrap=[Keyboard.WRAP_LEFT, Keyboard.WRAP_RIGHT],
+            render_now=False
+        )
+
+        self.text_entry_display = TextEntryDisplay(
+            canvas=self.renderer.canvas,
+            rect=(
+                GUIConstants.EDGE_PADDING,
+                text_entry_display_y,
+                self.canvas_width - self.right_panel_buttons_width,
+                text_entry_display_y + text_entry_display_height
+            ),
+            font_name=GUIConstants.FIXED_WIDTH_EMPHASIS_FONT_NAME_JP,
+            cursor_mode=TextEntryDisplay.CURSOR_MODE__BAR,
+            is_centered=False,
+            cur_text=''.join(self.textToEncode)
+        )
+
+        # Nudge the buttons off the right edge w/padding
+        hw_button_x = self.canvas_width - self.right_panel_buttons_width + GUIConstants.COMPONENT_PADDING
+
+        # Calc center button position first
+        hw_button_y = int((self.canvas_height - GUIConstants.BUTTON_HEIGHT)/2)
+
+        self.hw_button1 = Button(
+            text=self.KEYBOARD__UPPERCASE_BUTTON_TEXT,
+            is_text_centered=False,
+            font_name=GUIConstants.FIXED_WIDTH_EMPHASIS_FONT_NAME,
+            font_size=GUIConstants.get_button_font_size() + 4,
+            width=self.right_panel_buttons_width,
+            screen_x=hw_button_x,
+            screen_y=hw_button_y - 3*GUIConstants.COMPONENT_PADDING - GUIConstants.BUTTON_HEIGHT,
+            is_scrollable_text=False,
+        )
+
+        self.hw_button2 = Button(
+            text=self.KEYBOARD__DIGITS_BUTTON_TEXT,
+            is_text_centered=False,
+            font_name=GUIConstants.FIXED_WIDTH_EMPHASIS_FONT_NAME,
+            font_size=GUIConstants.get_button_font_size() + 4,
+            width=self.right_panel_buttons_width,
+            screen_x=hw_button_x,
+            screen_y=hw_button_y,
+            is_scrollable_text=False,
+        )
+
+        self.hw_button3 = IconButton(
+            icon_name=SeedSignerIconConstants.CHECK,
+            icon_color=GUIConstants.SUCCESS_COLOR,
+            width=self.right_panel_buttons_width,
+            screen_x=hw_button_x,
+            screen_y=hw_button_y + 3*GUIConstants.COMPONENT_PADDING + GUIConstants.BUTTON_HEIGHT,
+            is_scrollable_text=False,
+        )
+
+
+    def _render(self):
+        super()._render()
+
+        # Change from the default lowercase keyboard for the screenshot generator
+        if self.initial_keyboard == self.KEYBOARD__UPPERCASE_BUTTON_TEXT:
+            cur_keyboard = self.keyboard_ABC
+            self.hw_button1.text = self.KEYBOARD__LOWERCASE_BUTTON_TEXT
+
+        elif self.initial_keyboard == self.KEYBOARD__DIGITS_BUTTON_TEXT:
+            cur_keyboard = self.keyboard_digits
+            self.hw_button2.text = self.KEYBOARD__SYMBOLS_1_BUTTON_TEXT
+
+        elif self.initial_keyboard == self.KEYBOARD__SYMBOLS_1_BUTTON_TEXT:
+            cur_keyboard = self.keyboard_symbols_1
+            self.hw_button2.text = self.KEYBOARD__SYMBOLS_2_BUTTON_TEXT
+
+        elif self.initial_keyboard == self.KEYBOARD__SYMBOLS_2_BUTTON_TEXT:
+            cur_keyboard = self.keyboard_symbols_2
+            self.hw_button2.text = self.KEYBOARD__DIGITS_BUTTON_TEXT
+        
+        else:
+            cur_keyboard = self.keyboard_abc
+
+        self.text_entry_display.render()
+        self.hw_button1.render()
+        self.hw_button2.render()
+        self.hw_button3.render()
+        cur_keyboard.render_keys()
+
+        self.renderer.show_image()
+
+
+    def _run(self):
+        cursor_position = len(self.textToEncode)
+        cur_keyboard = self.keyboard_abc
+        cur_button1_text = self.KEYBOARD__UPPERCASE_BUTTON_TEXT
+        cur_button2_text = self.KEYBOARD__DIGITS_BUTTON_TEXT
+
+        # Start the interactive update loop
+        while True:
+            input = self.hw_inputs.wait_for(HardwareButtonsConstants.ALL_KEYS)
+
+            keyboard_swap = False
+
+            with self.renderer.lock:
+                # Check our two possible exit conditions
+                # TODO: note the unusual return value, consider refactoring to a Response object in the future
+                if input == HardwareButtonsConstants.KEY3:
+                    # Save!
+                    # First light up key3
+                    if len(self.textToEncode) > 0:
+                        self.hw_button3.is_selected = True
+                        self.hw_button3.render()
+                        self.renderer.show_image()
+                        return dict(textToEncode=self.textToEncode)
+
+                elif input == HardwareButtonsConstants.KEY_PRESS and self.top_nav.is_selected:
+                    # Back button clicked
+                    return dict(textToEncode=self.textToEncode, is_back_button=True)
+
+                # Check for keyboard swaps
+                if input == HardwareButtonsConstants.KEY1:
+                    # First light up key1
+                    self.hw_button1.is_selected = True
+                    self.hw_button1.render()
+
+                    # Return to the same button2 keyboard, if applicable
+                    if cur_keyboard == self.keyboard_digits:
+                        cur_button2_text = self.KEYBOARD__DIGITS_BUTTON_TEXT
+                    elif cur_keyboard == self.keyboard_symbols_1:
+                        cur_button2_text = self.KEYBOARD__SYMBOLS_1_BUTTON_TEXT
+                    elif cur_keyboard == self.keyboard_symbols_2:
+                        cur_button2_text = self.KEYBOARD__SYMBOLS_2_BUTTON_TEXT
+
+                    if cur_button1_text == self.KEYBOARD__LOWERCASE_BUTTON_TEXT:
+                        self.keyboard_abc.set_selected_key_indices(x=cur_keyboard.selected_key["x"], y=cur_keyboard.selected_key["y"])
+                        cur_keyboard = self.keyboard_abc
+                        cur_button1_text = self.KEYBOARD__UPPERCASE_BUTTON_TEXT
+                    else:
+                        self.keyboard_ABC.set_selected_key_indices(x=cur_keyboard.selected_key["x"], y=cur_keyboard.selected_key["y"])
+                        cur_keyboard = self.keyboard_ABC
+                        cur_button1_text = self.KEYBOARD__LOWERCASE_BUTTON_TEXT
+                    cur_keyboard.render_keys()
+
+                    # Show the changes; this loop will have two renders
+                    self.renderer.show_image()
+
+                    keyboard_swap = True
+                    ret_val = None
+
+                elif input == HardwareButtonsConstants.KEY2:
+                    # First light up key2
+                    self.hw_button2.is_selected = True
+                    self.hw_button2.render()
+                    self.renderer.show_image()
+
+                    # And reset for next redraw
+                    self.hw_button2.is_selected = False
+
+                    # Return to the same button1 keyboard, if applicable
+                    if cur_keyboard == self.keyboard_abc:
+                        cur_button1_text = self.KEYBOARD__LOWERCASE_BUTTON_TEXT
+                    elif cur_keyboard == self.keyboard_ABC:
+                        cur_button1_text = self.KEYBOARD__UPPERCASE_BUTTON_TEXT
+
+                    if cur_button2_text == self.KEYBOARD__DIGITS_BUTTON_TEXT:
+                        self.keyboard_digits.set_selected_key_indices(x=cur_keyboard.selected_key["x"], y=cur_keyboard.selected_key["y"])
+                        cur_keyboard = self.keyboard_digits
+                        cur_keyboard.render_keys()
+                        cur_button2_text = self.KEYBOARD__SYMBOLS_1_BUTTON_TEXT
+                    elif cur_button2_text == self.KEYBOARD__SYMBOLS_1_BUTTON_TEXT:
+                        self.keyboard_symbols_1.set_selected_key_indices(x=cur_keyboard.selected_key["x"], y=cur_keyboard.selected_key["y"])
+                        cur_keyboard = self.keyboard_symbols_1
+                        cur_keyboard.render_keys()
+                        cur_button2_text = self.KEYBOARD__SYMBOLS_2_BUTTON_TEXT
+                    elif cur_button2_text == self.KEYBOARD__SYMBOLS_2_BUTTON_TEXT:
+                        self.keyboard_symbols_2.set_selected_key_indices(x=cur_keyboard.selected_key["x"], y=cur_keyboard.selected_key["y"])
+                        cur_keyboard = self.keyboard_symbols_2
+                        cur_keyboard.render_keys()
+                        cur_button2_text = self.KEYBOARD__DIGITS_BUTTON_TEXT
+                    cur_keyboard.render_keys()
+
+                    # Show the changes; this loop will have two renders
+                    self.renderer.show_image()
+
+                    keyboard_swap = True
+                    ret_val = None
+
+                else:
+                    # Process normal input
+                    if input in [HardwareButtonsConstants.KEY_UP, HardwareButtonsConstants.KEY_DOWN] and self.top_nav.is_selected:
+                        # We're navigating off the previous button
+                        self.top_nav.is_selected = False
+                        self.top_nav.render_buttons()
+
+                        # Override the actual input w/an ENTER signal for the Keyboard
+                        if input == HardwareButtonsConstants.KEY_DOWN:
+                            input = Keyboard.ENTER_TOP
+                        else:
+                            input = Keyboard.ENTER_BOTTOM
+                    elif input in [HardwareButtonsConstants.KEY_LEFT, HardwareButtonsConstants.KEY_RIGHT] and self.top_nav.is_selected:
+                        # ignore
+                        continue
+
+                    ret_val = cur_keyboard.update_from_input(input)
+
+                # Now process the result from the keyboard
+                if ret_val in Keyboard.EXIT_DIRECTIONS:
+                    self.top_nav.is_selected = True
+                    self.top_nav.render_buttons()
+
+                elif ret_val in Keyboard.ADDITIONAL_KEYS and input == HardwareButtonsConstants.KEY_PRESS:
+                    if ret_val == Keyboard.KEY_BACKSPACE["code"]:
+                        if cursor_position == 0:
+                            pass
+                        elif cursor_position == len(self.textToEncode):
+                            self.textToEncode = self.textToEncode[:-1]
+                        else:
+                            self.textToEncode = self.textToEncode[:cursor_position - 1] + self.textToEncode[cursor_position:]
+
+                        cursor_position -= 1
+
+                    elif ret_val == Keyboard.KEY_CURSOR_LEFT["code"]:
+                        cursor_position -= 1
+                        if cursor_position < 0:
+                            cursor_position = 0
+
+                    elif ret_val == Keyboard.KEY_CURSOR_RIGHT["code"]:
+                        cursor_position += 1
+                        if cursor_position > len(self.textToEncode):
+                            cursor_position = len(self.textToEncode)
+
+                    elif ret_val == Keyboard.KEY_SPACE["code"]:
+                        if cursor_position == len(self.textToEncode):
+                            self.textToEncode += " "
+                        else:
+                            self.textToEncode = self.textToEncode[:cursor_position] + " " + self.textToEncode[cursor_position:]
+                        cursor_position += 1
+
+                    # Update the text entry display and cursor
+                    self.text_entry_display.render(self.textToEncode, cursor_position)
+
+                elif input == HardwareButtonsConstants.KEY_PRESS and ret_val not in Keyboard.ADDITIONAL_KEYS:
+                    # User has locked in the current letter
+                    if cursor_position == len(self.textToEncode):
+                        self.textToEncode += ret_val
+                    else:
+                        self.textToEncode = self.textToEncode[:cursor_position] + ret_val + self.textToEncode[cursor_position:]
+                    cursor_position += 1
+
+                    # Update the text entry display and cursor
+                    self.text_entry_display.render(self.textToEncode, cursor_position)
+
+                elif input in HardwareButtonsConstants.KEYS__LEFT_RIGHT_UP_DOWN or keyboard_swap:
+                    # Live joystick movement; haven't locked this new letter in yet.
+                    # Leave current spot blank for now. Only update the active keyboard keys
+                    # when a selection has been locked in (KEY_PRESS) or removed ("del").
+                    pass
+        
+                if keyboard_swap:
+                    # Show the hw buttons' updated text and not active state
+                    self.hw_button1.text = cur_button1_text
+                    self.hw_button2.text = cur_button2_text                
+                    self.hw_button1.is_selected = False
+                    self.hw_button2.is_selected = False
+                    self.hw_button1.render()
+                    self.hw_button2.render()
+
+                self.renderer.show_image()
+
+
+@dataclass
+class ToolsTextQRReviewTextScreen(ButtonListScreen):
+    textToEncode: str = None
+    title: str = None
+    max_lines: int = 5
+    visible_space: bool = True
+
+    def __post_init__(self):
+        # Customize defaults
+        self.is_bottom_list = True
+
+        super().__post_init__()
+
+        if self.visible_space and " " in self.textToEncode:
+            self.textToEncode = self.textToEncode.replace(" ", "\u2589")
+
+        review_font_name = (
+            GUIConstants.FIXED_WIDTH_FONT_NAME
+            if self.textToEncode.isascii()
+            else GUIConstants.FIXED_WIDTH_FONT_NAME_JP
+        )
+        available_height = self.buttons[0].screen_y - self.top_nav.height - GUIConstants.COMPONENT_PADDING
+        max_font_size = GUIConstants.get_top_nav_title_font_size() + 8
+        min_font_size = GUIConstants.get_top_nav_title_font_size() - 4
+        font_size = max_font_size
+        max_lines = self.max_lines
+        max_chars_per_line = -1
+        found_solution = False
+        for font_size in range(max_font_size, min_font_size-1, -2):
+            if found_solution:
+                break
+            font = Fonts.get_font(font_name=review_font_name, size=font_size)
+            left, top, right, bottom  = font.getbbox("X")
+            char_width, char_height = right - left, bottom
+            for num_lines in range(1, max_lines+1):
+                # Break the textToEncode into n lines
+                chars_per_line = math.ceil(textwidth(self.textToEncode) / num_lines)
+                if font_size <= min_font_size + 1 and num_lines == max_lines:
+                    max_chars_per_line = math.floor((self.canvas_width - 2*GUIConstants.EDGE_PADDING) / char_width)
+                    chars_per_line = min(chars_per_line, max_chars_per_line)
+                textToEncode = []
+                k = 0
+                for i in range(0, num_lines):
+                    buffer = ""
+                    for j in range(k, len(self.textToEncode)):
+                        c = self.textToEncode[j]
+                        if textwidth(buffer + c) > chars_per_line:
+                            if (textwidth(self.textToEncode[j:]) <= chars_per_line * (num_lines-1 - i) or
+                                chars_per_line == max_chars_per_line):
+                                textToEncode.append(buffer)
+                                k = j
+                            else:
+                                chars_per_line += 1
+                                textToEncode.append(buffer + c)
+                                k = j + 1
+                            break
+                        elif textwidth(buffer + c) == chars_per_line:
+                            textToEncode.append(buffer + c)
+                            k = j + 1
+                            break
+                        elif j == len(self.textToEncode) - 1:
+                            textToEncode.append(buffer + c)
+                            break
+                        buffer += c
+
+                # Truncate the displayed textToEncode to fit within the screen
+                if sum(len(x) for x in textToEncode) != len(self.textToEncode):
+                    buffer = ""
+                    for j in range(0, len(textToEncode[-1])):
+                        c = textToEncode[-1][j]
+                        if textwidth(buffer + c) <= chars_per_line - textwidth("\u2026"):
+                            buffer += c
+                        else:
+                            break
+                    buffer += "\u2026"
+                    textToEncode[-1] = buffer
+
+                for i in range(0, num_lines):
+                    while textwidth(textToEncode[i]) < chars_per_line:
+                        textToEncode[i] += " "
+
+                # See if it fits in this configuration
+                if chars_per_line * char_width <= self.canvas_width - 2*GUIConstants.EDGE_PADDING:
+                    # Width is good...
+                    if num_lines * char_height <= available_height:
+                        # And the height is good!
+                        found_solution = True
+                        break
+
+        # Set up each line of text
+        screen_y = self.top_nav.height + int((available_height - char_height*num_lines)/2) - GUIConstants.COMPONENT_PADDING
+        for line in textToEncode:
+            self.components.append(TextArea(
+                text=line,
+                font_name=review_font_name,
+                font_size=font_size,
+                font_color="orange",
+                is_text_centered=True,
+                screen_y=screen_y,
+            ))
+            screen_y += char_height + 2
+
+
+def textwidth(text: str):
+    import unicodedata
+    count = 0
+    for c in text:
+        if unicodedata.east_asian_width(c) in 'FW':
+            count += 2
+        else:
+            count += 1
+    return count

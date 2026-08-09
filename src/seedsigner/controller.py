@@ -112,6 +112,11 @@ class Controller(Singleton):
     psbt: PSBT = None
     psbt_seed: Seed = None
     psbt_parser: PSBTParser = None
+    psbt_sign_with_satochip: bool = False
+    psbt_from_microsd: bool = False
+    psbt_microsd_save_path = None
+    psbt_microsd_seed_warning_shown: bool = False
+    sign_message_with_satochip: bool = False
 
     unverified_address = None
 
@@ -125,6 +130,14 @@ class Controller(Singleton):
     sign_message_data: dict = None
     # TODO: end refactor section
 
+    # Smartcard session state (only used when smartcard support is enabled)
+    Satochip_Connector = None
+    Satochip_PIN = None
+    Satochip_Last_UID_SHA1 = None
+    smartcard_backend_preference: str = None
+    tools_common_card_filter: list = None
+    javacard_keys: dict = None
+
     # Destination placeholder for when we need to jump out to a side flow but intend to
     # return navigation to the main flow (e.g. PSBT flow, load multisig descriptor,
     # then resume PSBT flow).
@@ -133,6 +146,7 @@ class Controller(Singleton):
     FLOW__VERIFY_SINGLESIG_ADDR = "singlesig_addr"
     FLOW__ADDRESS_EXPLORER = "address_explorer"
     FLOW__SIGN_MESSAGE = "sign_message"
+    FLOW__SATOCHIP_IMPORT_SEED = "satochip_import_seed"
     resume_main_flow: str = None
 
     back_stack: BackStack = None
@@ -187,6 +201,11 @@ class Controller(Singleton):
         # Store one working psbt in memory
         controller.psbt = None
         controller.psbt_parser = None
+        controller.psbt_sign_with_satochip = False
+        controller.psbt_from_microsd = False
+        controller.psbt_microsd_save_path = None
+        controller.psbt_microsd_seed_warning_shown = False
+        controller.sign_message_with_satochip = False
 
         # Configure the Renderer
         Renderer.configure_instance()
@@ -303,6 +322,15 @@ class Controller(Singleton):
                     self.psbt = None
                     self.psbt_parser = None
                     self.psbt_seed = None
+                    self.psbt_sign_with_satochip = False
+                    self.sign_message_with_satochip = False
+
+                    # Clear the smartcard session unless PIN caching is enabled
+                    # (equivalent to removing the card)
+                    if self.settings.get_value(SettingsConstants.SETTING__CACHE_SCARD_PIN, default_if_none=True) != SettingsConstants.OPTION__ENABLED:
+                        self.Satochip_PIN = None
+                        self.Satochip_Last_UID_SHA1 = None
+                        self.Satochip_Connector = None
                 
                 logger.info(f"\nback_stack: {self.back_stack}")
 

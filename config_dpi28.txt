@@ -42,5 +42,5 @@ gpu_mem=128
 # Disable audio
 dtparam=audio=off
 
-# USB gadget mode for SSH over USB
-dtoverlay=dwc2
+# USB stays in host mode (stock dwc_otg driver) for PC/SC smartcard readers via
+# an OTG adapter. A signer should never enumerate as a USB network gadget.

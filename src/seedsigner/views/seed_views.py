@@ -251,6 +251,7 @@ class LoadSeedView(View):
     TYPE_12WORD = ButtonOption("Enter 12-word seed", FontAwesomeIconConstants.KEYBOARD)
     TYPE_24WORD = ButtonOption("Enter 24-word seed", FontAwesomeIconConstants.KEYBOARD)
     TYPE_ELECTRUM = ButtonOption("Enter Electrum seed", FontAwesomeIconConstants.KEYBOARD)
+    IMPORT_SEEDKEEPER = ButtonOption("Import from Seedkeeper", SeedSignerIconConstants.FINGERPRINT)
     CREATE = ButtonOption("Create a seed", SeedSignerIconConstants.PLUS)
 
     def run(self):
@@ -262,7 +263,10 @@ class LoadSeedView(View):
 
         if self.settings.get_value(SettingsConstants.SETTING__ELECTRUM_SEEDS) == SettingsConstants.OPTION__ENABLED:
             button_data.append(self.TYPE_ELECTRUM)
-        
+
+        if self.settings.get_value(SettingsConstants.SETTING__SMARTCARD_SUPPORT) == SettingsConstants.OPTION__ENABLED:
+            button_data.append(self.IMPORT_SEEDKEEPER)
+
         button_data.append(self.CREATE)
 
         selected_menu_num = self.run_screen(
@@ -289,6 +293,9 @@ class LoadSeedView(View):
 
         elif button_data[selected_menu_num] == self.TYPE_ELECTRUM:
             return Destination(SeedElectrumMnemonicStartView)
+
+        elif button_data[selected_menu_num] == self.IMPORT_SEEDKEEPER:
+            return Destination(SeedKeeperSelectView)
 
         elif button_data[selected_menu_num] == self.CREATE:
             from .tools_views import ToolsMenuView
@@ -436,7 +443,16 @@ class SeedFinalizeView(View):
         )
 
         if button_data[selected_menu_num] == self.FINALIZE:
+            from seedsigner.controller import Controller
             seed = self.controller.storage.finalize_pending_seed()
+
+            if self.controller.resume_main_flow == Controller.FLOW__SATOCHIP_IMPORT_SEED:
+                # This seed was entered/created in order to import it onto a smartcard;
+                # resume that flow.
+                from seedsigner.views.smartcard_views import ToolsSatochipImportSeedView
+                self.controller.resume_main_flow = None
+                return Destination(ToolsSatochipImportSeedView, clear_history=True)
+
             return Destination(SeedOptionsView, view_args={"seed": seed}, clear_history=True)
 
         elif button_data[selected_menu_num] == self.PASSPHRASE:
@@ -2398,3 +2414,179 @@ class SeedSignMessageSignedMessageQRView(View):
 
         # Exiting/Canceling the QR display screen always returns Home
         return Destination(MainMenuView, skip_current_view=True)
+
+
+class AccountNumberView(View):
+    def __init__(self, next_view_cls, next_view_args: dict):
+        super().__init__()
+        self.next_view_cls = next_view_cls
+        self.next_view_args = next_view_args
+
+    def run(self):
+        ret = self.run_screen(
+            seed_screens.SeedExportXpubAccountNumberScreen,
+            initial_value="0",
+        )
+
+        if ret == RET_CODE__BACK_BUTTON:
+            return Destination(BackStackView)
+
+        self.next_view_args["account"] = int(ret)
+        return Destination(self.next_view_cls, view_args=self.next_view_args)
+
+
+
+class SeedKeeperSelectView(View):
+    def entropy_to_mnemonic(self, entropy_bytes, wordlist):
+        # embit only bundles the English wordlist; other Seedkeeper wordlists are
+        # not supported in this build.
+        if wordlist and wordlist.lower() not in ("english", "en"):
+            raise ValueError(f"Unsupported BIP-39 wordlist: {wordlist}")
+        from embit import bip39
+        return bip39.mnemonic_from_bytes(entropy_bytes)
+
+    def run(self):
+        from binascii import unhexlify
+        from pysatochip.JCconstants import SEEDKEEPER_DIC_TYPE, SEEDKEEPER_DIC_EXPORT_RIGHTS, BIP39_WORDLIST_DIC
+        from seedsigner.gui.screens.screen import LoadingScreenThread, WarningScreen
+        from seedsigner.helpers import seedkeeper_utils
+        try:
+            Satochip_Connector = seedkeeper_utils.init_satochip(self, init_card_filter=["seedkeeper"])
+
+            if not Satochip_Connector:
+                return Destination(BackStackView)
+
+            self.loading_screen = LoadingScreenThread(text="Listing Seeds\n\n\n\n\n\n")
+            self.loading_screen.start()
+
+            headers = Satochip_Connector.seedkeeper_list_secret_headers()
+            self.loading_screen.stop()
+
+            headers_parsed = []
+            button_data = []
+
+            for header in headers:
+                sid = header['id']
+                label = header['label']
+                stype = SEEDKEEPER_DIC_TYPE.get(header['type'], hex(header['type']))
+                subtype = header['subtype']
+                export_rights = SEEDKEEPER_DIC_EXPORT_RIGHTS.get(header['export_rights'], hex(header['export_rights']))
+
+                if ((stype == "BIP39 mnemonic" and export_rights == 'Plaintext export allowed') or
+                        (stype == 'Masterseed' and subtype == 0x01) or
+                        (stype == 'Electrum mnemonic' and export_rights == 'Plaintext export allowed')):
+
+                    if not label:
+                        label = "Unnamed Secret"
+
+                    headers_parsed.append({
+                        "sid": sid,
+                        "label": label,
+                        "stype": stype,
+                        "subtype": subtype
+                    })
+                    button_data.append(ButtonOption(label))
+
+            if len(headers_parsed) < 1:
+                self.run_screen(
+                    WarningScreen,
+                    title="No Secrets to Load",
+                    status_headline=None,
+                    text="No BIP39 Secrets to Load from Seedkeeper",
+                    show_back_button=False,
+                )
+                return Destination(BackStackView)
+
+            selected_menu_num = self.run_screen(
+                ButtonListScreen,
+                title="Select Secret",
+                is_button_text_centered=False,
+                button_data=button_data,
+                show_back_button=True,
+            )
+
+            if selected_menu_num == RET_CODE__BACK_BUTTON:
+                return Destination(BackStackView)
+
+            selected_header = headers_parsed[selected_menu_num]
+            sid = selected_header["sid"]
+            stype = selected_header["stype"]
+            subtype = selected_header["subtype"]
+            label = selected_header["label"]
+
+            self.loading_screen = LoadingScreenThread(text="Loading Seed\n\n\n\n\n\n")
+            self.loading_screen.start()
+
+            secret_dict = Satochip_Connector.seedkeeper_export_secret(sid, None)
+            self.loading_screen.stop()
+
+            assert stype == SEEDKEEPER_DIC_TYPE.get(secret_dict['type'], hex(secret_dict['type']))
+
+            if stype == 'BIP39 mnemonic' or stype == 'Electrum mnemonic':
+                secret_dict['secret'] = unhexlify(secret_dict['secret'])[1:].decode().rstrip("\x00")
+                bip39_secret = secret_dict['secret']
+                secret_size = secret_dict['secret_list'][0]
+                secret_mnemonic = bip39_secret[:secret_size]
+                secret_passphrase = bip39_secret[secret_size + 1:]
+
+            elif stype == 'Masterseed' and subtype == 0x01:
+                secret_raw_bytes = bytes.fromhex(secret_dict['secret'])
+                offset = 0
+                masterseed_size = secret_raw_bytes[offset]
+                offset += 1
+                masterseed_bytes = secret_raw_bytes[offset:offset + masterseed_size]
+                offset += masterseed_size
+                wordlist_byte = secret_raw_bytes[offset]
+                offset += 1
+                wordlist = BIP39_WORDLIST_DIC.get(wordlist_byte)
+                entropy_size = secret_raw_bytes[offset]
+                offset += 1
+                entropy_bytes = secret_raw_bytes[offset:offset + entropy_size]
+                offset += entropy_size
+                bip39_mnemonic = self.entropy_to_mnemonic(entropy_bytes, wordlist)
+                passphrase_size = secret_raw_bytes[offset]
+                offset += 1
+                passphrase_bytes = secret_raw_bytes[offset:offset + passphrase_size]
+                offset += passphrase_size
+                passphrase = passphrase_bytes.decode("utf-8")
+                secret_mnemonic = bip39_mnemonic
+                secret_passphrase = passphrase
+
+            else:
+                raise ValueError(f"Unsupported secret type: {stype}, subtype: {subtype}")
+
+        except Exception as e:
+            logger.debug(f"Seedkeeper secret load failed: {e}")
+            if hasattr(self, 'loading_screen'):
+                self.loading_screen.stop()
+            time.sleep(0.1)
+            self.run_screen(
+                WarningScreen,
+                title="Error",
+                status_headline=None,
+                text=str(e),
+                show_back_button=True,
+            )
+            return Destination(BackStackView)
+
+        mnemonic = secret_mnemonic.split(" ")
+        self.controller.storage.init_pending_mnemonic(
+            num_words=len(mnemonic),
+            is_electrum=(stype == 'Electrum mnemonic'),
+        )
+        for i, word in enumerate(mnemonic):
+            self.controller.storage.update_pending_mnemonic(word, i)
+
+        from seedsigner.models.seed import InvalidSeedException
+        try:
+            self.controller.storage.convert_pending_mnemonic_to_pending_seed()
+        except InvalidSeedException:
+            return Destination(SeedMnemonicInvalidView)
+
+        self.seed = self.controller.storage.get_pending_seed()
+
+        if len(secret_passphrase) > 0:
+            self.seed.set_passphrase(secret_passphrase)
+            return Destination(SeedReviewPassphraseView)
+
+        return Destination(SeedFinalizeView)

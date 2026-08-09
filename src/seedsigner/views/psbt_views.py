@@ -1,15 +1,25 @@
+import logging
+
+from binascii import hexlify
 from gettext import gettext as _
+
+from embit import bip32
 
 from seedsigner.models.psbt_parser import PSBTParser
 from seedsigner.models.settings import SettingsConstants
 from seedsigner.gui.components import FontAwesomeIconConstants, SeedSignerIconConstants
-from seedsigner.gui.screens.screen import (RET_CODE__BACK_BUTTON, ButtonListScreen, ButtonOption, WarningScreen, DireWarningScreen, QRDisplayScreen)
+from seedsigner.gui.screens.screen import (RET_CODE__BACK_BUTTON, ButtonListScreen, ButtonOption, WarningScreen, DireWarningScreen, LargeIconStatusScreen, QRDisplayScreen)
+from seedsigner.hardware.microsd import MicroSD
 from seedsigner.views.view import BackStackView, MainMenuView, NotYetImplementedView, View, Destination
+
+logger = logging.getLogger(__name__)
 
 
 
 class PSBTSelectSeedView(View):
     SCAN_SEED = ButtonOption("Scan a seed", SeedSignerIconConstants.QRCODE)
+    SATOCHIP = ButtonOption("Use Satochip card", SeedSignerIconConstants.FINGERPRINT)
+    KEYCARD = ButtonOption("Use Keycard", SeedSignerIconConstants.FINGERPRINT)
     TYPE_12WORD = ButtonOption("Enter 12-word seed", FontAwesomeIconConstants.KEYBOARD)
     TYPE_24WORD = ButtonOption("Enter 24-word seed", FontAwesomeIconConstants.KEYBOARD)
     TYPE_ELECTRUM = ButtonOption("Enter Electrum seed", FontAwesomeIconConstants.KEYBOARD)
@@ -17,6 +27,26 @@ class PSBTSelectSeedView(View):
 
     def run(self):
         from seedsigner.controller import Controller
+
+        def ensure_microsd_seed_warning() -> bool:
+            # A PSBT loaded from the microSD means secrets used with it may leave a
+            # trace on the card; warn once before a seed enters the picture.
+            if not self.controller.psbt_from_microsd:
+                return True
+            if self.controller.psbt_microsd_seed_warning_shown:
+                return True
+            ret = self.run_screen(
+                WarningScreen,
+                title="WARNING",
+                status_headline=None,
+                text="These tools load data from the microSD card and may expose loaded secrets.",
+                show_back_button=True,
+                button_data=[ButtonOption("Continue")],
+            )
+            if ret == RET_CODE__BACK_BUTTON:
+                return False
+            self.controller.psbt_microsd_seed_warning_shown = True
+            return True
 
         # Note: we can't just autoroute to the PSBT Overview because we might have a
         # multisig where we want to sign with more than one key on this device.
@@ -29,6 +59,8 @@ class PSBTSelectSeedView(View):
                  # skip the seed prompt if a seed was previously selected and has matching input fingerprint
                  return Destination(PSBTOverviewView)
 
+        smartcard_enabled = self.settings.get_value(SettingsConstants.SETTING__SMARTCARD_SUPPORT) == SettingsConstants.OPTION__ENABLED
+
         seeds = self.controller.storage.seeds
         button_data = []
         for seed in seeds:
@@ -40,6 +72,10 @@ class PSBTSelectSeedView(View):
 
             button_data.append(ButtonOption(button_str, SeedSignerIconConstants.FINGERPRINT))
 
+        if smartcard_enabled and self.settings.get_value(SettingsConstants.SETTING__SATOCHIP_SUPPORT) == SettingsConstants.OPTION__ENABLED:
+            button_data.append(self.SATOCHIP)
+        if smartcard_enabled and self.settings.get_value(SettingsConstants.SETTING__KEYCARD_SUPPORT) == SettingsConstants.OPTION__ENABLED:
+            button_data.append(self.KEYCARD)
         button_data.append(self.SCAN_SEED)
         button_data.append(self.TYPE_12WORD)
         button_data.append(self.TYPE_24WORD)
@@ -54,21 +90,35 @@ class PSBTSelectSeedView(View):
         )
 
         if selected_menu_num == RET_CODE__BACK_BUTTON:
+            if self.controller.psbt_from_microsd:
+                self.controller.psbt_from_microsd = False
+                self.controller.psbt_microsd_save_path = None
+                self.controller.psbt_microsd_seed_warning_shown = False
             return Destination(BackStackView)
 
         if len(seeds) > 0 and selected_menu_num < len(seeds):
             # User selected one of the n seeds
+            if not ensure_microsd_seed_warning():
+                return Destination(PSBTSelectSeedView)
             self.controller.psbt_seed = seeds[selected_menu_num]
+            self.controller.psbt_sign_with_satochip = False
             return Destination(PSBTOverviewView)
-        
+
         # The remaining flows are a sub-flow; resume PSBT flow once the seed is loaded.
         self.controller.resume_main_flow = Controller.FLOW__PSBT
 
         if button_data[selected_menu_num] == self.SCAN_SEED:
+            if not ensure_microsd_seed_warning():
+                return Destination(PSBTSelectSeedView)
             from seedsigner.views.scan_views import ScanSeedQRView
             return Destination(ScanSeedQRView)
 
+        elif button_data[selected_menu_num] in [self.SATOCHIP, self.KEYCARD]:
+            return self.run_smartcard_flow(button_data[selected_menu_num])
+
         elif button_data[selected_menu_num] in [self.TYPE_12WORD, self.TYPE_24WORD]:
+            if not ensure_microsd_seed_warning():
+                return Destination(PSBTSelectSeedView)
             from seedsigner.views.seed_views import SeedMnemonicEntryView
             if button_data[selected_menu_num] == self.TYPE_12WORD:
                 self.controller.storage.init_pending_mnemonic(num_words=12)
@@ -77,8 +127,194 @@ class PSBTSelectSeedView(View):
             return Destination(SeedMnemonicEntryView)
 
         elif button_data[selected_menu_num] == self.TYPE_ELECTRUM:
+            if not ensure_microsd_seed_warning():
+                return Destination(PSBTSelectSeedView)
             from seedsigner.views.seed_views import SeedElectrumMnemonicStartView
             return Destination(SeedElectrumMnemonicStartView)
+
+
+    def run_smartcard_flow(self, card_choice) -> Destination:
+        """
+            Sets up the PSBT for card-based signing: exports the account xpub from the
+            card, verifies the card's fingerprint appears among the PSBT's signers and
+            parses the PSBT against the card's account xpub (or bare for multisig).
+            Signing itself happens on-card in PSBTFinalizeView.
+        """
+        from embit.bip32 import HDKey
+        from seedsigner.helpers import seedkeeper_utils
+
+        if card_choice == self.KEYCARD:
+            backend_preference = "keycard"
+            card_label = "Keycard"
+        else:
+            backend_preference = "pysatochip"
+            card_label = "Satochip"
+        self.controller.smartcard_backend_preference = backend_preference
+
+        connector = seedkeeper_utils.init_satochip(
+            self,
+            init_card_filter=["satochip"],
+            backend_preference=backend_preference,
+        )
+        if not connector:
+            return Destination(PSBTSelectSeedView, clear_history=True)
+
+        network = self.settings.get_value(SettingsConstants.SETTING__NETWORK)
+        psbt = self.controller.psbt
+
+        is_multisig_psbt = False
+        try:
+            if psbt and psbt.inputs:
+                first_input = psbt.inputs[0]
+                if first_input.witness_utxo:
+                    script_pubkey = first_input.witness_utxo.script_pubkey
+                elif first_input.non_witness_utxo:
+                    script_pubkey = first_input.script_pubkey
+                else:
+                    script_pubkey = None
+
+                if script_pubkey is not None:
+                    policy = PSBTParser._get_policy(first_input, script_pubkey, psbt.xpubs)
+                    is_multisig_psbt = isinstance(policy, dict) and "m" in policy
+        except Exception as exc:
+            logger.debug("Unable to determine PSBT policy", exc_info=exc)
+
+        if is_multisig_psbt:
+            # No root key needed: change is verified against the wallet descriptor.
+            try:
+                parser = PSBTParser(psbt, network=network)
+                parser.parse()
+            except Exception as e:
+                logger.exception("Failed to parse PSBT with %s data", card_label)
+                self.run_screen(
+                    WarningScreen,
+                    title="Failed",
+                    status_headline=None,
+                    text=str(e),
+                )
+                return Destination(PSBTSelectSeedView, clear_history=True)
+
+            self.controller.psbt_parser = parser
+            self.controller.psbt_seed = None
+            self.controller.psbt_sign_with_satochip = True
+            return Destination(PSBTOverviewView)
+
+        is_mainnet = network == SettingsConstants.MAINNET
+
+        if not psbt.inputs[0].bip32_derivations:
+            # e.g. taproot inputs (only taproot_bip32_derivations set): the card
+            # signers are ECDSA-only and cannot sign these.
+            self.run_screen(
+                WarningScreen,
+                title="Failed",
+                status_headline=None,
+                text=f"PSBT input type not supported for {card_label} signing.",
+            )
+            return Destination(PSBTSelectSeedView, clear_history=True)
+
+        first_der = next(iter(psbt.inputs[0].bip32_derivations.values())).derivation
+        account_path = []
+        HARDENED_INDEX = 0x80000000
+        for idx in first_der:
+            if idx & HARDENED_INDEX:
+                account_path.append(idx)
+            else:
+                break
+
+        account_path_str = "m"
+        for i in account_path:
+            hardened = bool(i & HARDENED_INDEX)
+            index = i & 0x7FFFFFFF
+            suffix = "'" if hardened else ""
+            account_path_str += f"/{index}{suffix}"
+
+        purpose = account_path[0] & 0x7FFFFFFF if account_path else 0
+        xtype = {
+            44: "standard",
+            49: "p2wpkh-p2sh",
+            84: "p2wpkh",
+            48: "p2wsh-p2sh" if len(account_path) > 3 and (account_path[3] & 0x7FFFFFFF) == 1 else "p2wsh",
+        }.get(purpose, "standard")
+
+        from seedsigner.gui.screens.screen import LoadingScreenThread
+        loading = LoadingScreenThread(text=_("Parsing PSBT..."))
+        loading.start()
+        loading_stopped = False
+        try:
+            try:
+                account_xpub = connector.card_bip32_get_xpub(account_path_str, xtype, is_mainnet)
+                master_xpub = connector.card_bip32_get_xpub("", xtype, is_mainnet)
+            except Exception as e:
+                logger.exception("Failed to export xpub from %s card", card_label)
+                loading.stop()
+                loading_stopped = True
+                self.run_screen(
+                    WarningScreen,
+                    title="Failed",
+                    status_headline=None,
+                    text=str(e),
+                )
+                return Destination(PSBTSelectSeedView, clear_history=True)
+
+            root_key = HDKey.from_base58(account_xpub)
+            master_fp = HDKey.from_base58(master_xpub).my_fingerprint
+
+            try:
+                self.controller.psbt_parser = PSBTParser(
+                    psbt,
+                    seed=None,
+                    root=root_key,
+                    root_path=account_path,
+                    master_fingerprint=master_fp,
+                    network=network,
+                )
+            except Exception as e:
+                logger.exception("Failed to parse PSBT with %s data", card_label)
+                loading.stop()
+                loading_stopped = True
+                self.run_screen(
+                    WarningScreen,
+                    title="Failed",
+                    status_headline=None,
+                    text=str(e),
+                )
+                return Destination(PSBTSelectSeedView, clear_history=True)
+
+            card_fingerprints = {hexlify(master_fp).decode()}
+            try:
+                card_fingerprints.add(hexlify(root_key.child(0).fingerprint).decode())
+            except Exception:
+                pass
+
+            psbt_fingerprints = set(PSBTParser.get_input_fingerprints(psbt))
+            if not card_fingerprints.intersection(psbt_fingerprints):
+                logger.warning(
+                    "%s fingerprint mismatch: card %s vs psbt %s",
+                    card_label,
+                    sorted(card_fingerprints),
+                    sorted(psbt_fingerprints),
+                )
+                self.controller.psbt_parser = None
+                self.controller.psbt_sign_with_satochip = False
+                loading.stop()
+                loading_stopped = True
+                self.run_screen(
+                    WarningScreen,
+                    title=_("Fingerprint mismatch"),
+                    status_icon_name=SeedSignerIconConstants.WARNING,
+                    status_headline=_("Card cannot sign PSBT"),
+                    text=_(
+                        "Card fingerprint ({}) not in PSBT signers."
+                    ).format(sorted(card_fingerprints)[0]),
+                )
+                return Destination(PSBTSelectSeedView, clear_history=True)
+        finally:
+            if not loading_stopped:
+                loading.stop()
+
+        self.controller.psbt_seed = None
+        self.controller.psbt_sign_with_satochip = True
+        return Destination(PSBTOverviewView)
 
 
 
@@ -332,18 +568,36 @@ class PSBTChangeDetailsView(View):
 
         # Single-sig verification is easy. We expect to find a single fingerprint
         # and derivation path.
-        seed_fingerprint = self.controller.psbt_seed.get_fingerprint(self.settings.get_value(SettingsConstants.SETTING__NETWORK))
+        fingerprints = change_data.get("fingerprint") or []
+        derivation_paths = change_data.get("derivation_path") or []
 
-        if seed_fingerprint not in change_data.get("fingerprint"):
-            # TODO: Something is wrong with this psbt(?). Reroute to warning?
-            return Destination(NotYetImplementedView)
+        if self.controller.psbt_seed:
+            seed_fingerprint = self.controller.psbt_seed.get_fingerprint(self.settings.get_value(SettingsConstants.SETTING__NETWORK))
+        else:
+            # Smartcard signing flow: the parser carries the card's master fingerprint
+            master_fp = psbt_parser.master_fingerprint
+            seed_fingerprint = hexlify(master_fp).decode() if master_fp else None
 
-        i = change_data.get("fingerprint").index(seed_fingerprint)
-        derivation_path = change_data.get("derivation_path")[i]
+        if seed_fingerprint:
+            if seed_fingerprint not in fingerprints:
+                # TODO: Something is wrong with this psbt(?). Reroute to warning?
+                return Destination(NotYetImplementedView)
+            index = fingerprints.index(seed_fingerprint)
+        else:
+            # Bare multisig parse (smartcard flow): no signer fingerprint to match
+            # against; display the change output's first listed fingerprint.
+            index = 0 if fingerprints else None
+            if index is not None:
+                seed_fingerprint = fingerprints[index]
+
+        derivation_path = ""
+        if index is not None and index < len(derivation_paths):
+            derivation_path = derivation_paths[index]
 
         # 'm/84h/1h/0h/1/0' would be a change addr while 'm/84h/1h/0h/0/0' is a self-receive
-        is_change_derivation_path = int(derivation_path.split("/")[-2]) == 1
-        derivation_path_addr_index = int(derivation_path.split("/")[-1])
+        path_ints = bip32.parse_path(derivation_path) if derivation_path else []
+        is_change_derivation_path = len(path_ints) >= 2 and (path_ints[-2] & 0x7FFFFFFF) == 1
+        derivation_path_addr_index = path_ints[-1] & 0x7FFFFFFF if path_ints else 0
 
         if is_change_derivation_path:
             # TRANSLATOR_NOTE: The amount you're receiving back from the transaction
@@ -384,14 +638,24 @@ class PSBTChangeDetailsView(View):
                 script_type = pubkey.script_type()
                 
                 # extract derivation path to get wallet and change derivation
-                change_path = '/'.join(derivation_path.split("/")[-2:])
-                wallet_path = '/'.join(derivation_path.split("/")[:-2])
-                
-                xpub = self.controller.psbt_seed.get_xpub(
-                    wallet_path=wallet_path,
-                    network=self.settings.get_value(SettingsConstants.SETTING__NETWORK)
-                )
-                
+                change_path = bip32.path_to_str(path_ints[-2:])[2:] if len(path_ints) >= 2 else ""
+                wallet_path_list = path_ints[:-2]
+                wallet_path = bip32.path_to_str(wallet_path_list)
+
+                if self.controller.psbt_seed:
+                    xpub = self.controller.psbt_seed.get_xpub(
+                        wallet_path=wallet_path,
+                        network=self.settings.get_value(SettingsConstants.SETTING__NETWORK)
+                    )
+                else:
+                    # Smartcard flow: derive from the card's account-level xpub
+                    rel_wallet_path_list = wallet_path_list[len(psbt_parser.root_path):]
+                    xpub = (
+                        psbt_parser.root.derive(rel_wallet_path_list)
+                        if rel_wallet_path_list
+                        else psbt_parser.root
+                    )
+
                 # take script type and call script method to generate address from seed / derivation
                 xpub_key = xpub.derive(change_path).key
                 network = self.settings.get_value(SettingsConstants.SETTING__NETWORK)
@@ -525,10 +789,14 @@ class PSBTFinalizeView(View):
         psbt_parser: PSBTParser = self.controller.psbt_parser
         psbt: PSBT = self.controller.psbt
 
-        if not psbt_parser:
+        if psbt is None:
             # Should not be able to get here
             return Destination(MainMenuView)
-        
+
+        if not self.controller.psbt_sign_with_satochip and psbt_parser is None:
+            # Should not be able to get here
+            return Destination(MainMenuView)
+
         selected_menu_num = self.run_screen(
             PSBTFinalizeScreen,
             button_data=[self.APPROVE_PSBT]
@@ -537,27 +805,125 @@ class PSBTFinalizeView(View):
         if selected_menu_num == RET_CODE__BACK_BUTTON:
             return Destination(BackStackView)
 
-        else:
-            # Sign PSBT
-            sig_cnt = PSBTParser.sig_count(psbt)
-            psbt.sign_with(psbt_parser.root)
-            trimmed_psbt = PSBTParser.trim(psbt)
+        # Sign PSBT
+        sig_cnt = PSBTParser.sig_count(psbt)
 
-            if sig_cnt == PSBTParser.sig_count(trimmed_psbt):
-                # Signing failed / didn't do anything
-                # TODO: Reserved for Nick. Are there different failure scenarios that we can detect?
-                # Would be nice to alter the message on the next screen w/more detail.
-                return Destination(PSBTSigningErrorView)
-            
+        connector = None
+        if self.controller.psbt_sign_with_satochip:
+            from seedsigner.helpers import seedkeeper_utils
+            connector = seedkeeper_utils.init_satochip(self, init_card_filter=["satochip"])
+            if not connector:
+                return Destination(PSBTFinalizeView)
+
+        from seedsigner.gui.screens.screen import LoadingScreenThread
+        loading = LoadingScreenThread(text=_("Signing PSBT..."))
+        loading.start()
+        try:
+            sign_result = None
+            if self.controller.psbt_sign_with_satochip:
+                # Signing happens on-card, input by input; a timeout is retryable
+                # (state is tracked on the controller so retries can extend it).
+                retry_timeout = getattr(self.controller, "_psbt_sign_retry_timeout", None)
+                if getattr(connector, "is_keycard_backend", False):
+                    from seedsigner.helpers.keycard_signer import sign_psbt_with_keycard
+                    sign_result = sign_psbt_with_keycard(psbt, connector, timeout=retry_timeout)
+                else:
+                    from seedsigner.helpers.satochip_signer import sign_psbt_with_satochip
+                    sign_result = sign_psbt_with_satochip(psbt, connector, timeout=retry_timeout)
             else:
-                self.controller.psbt = trimmed_psbt
-                return Destination(PSBTSignedQRDisplayView)
+                psbt.sign_with(psbt_parser.root)
+
+            trimmed_psbt = PSBTParser.trim(psbt)
+        except Exception:
+            if self.controller.psbt_sign_with_satochip:
+                logger.exception("Failed to sign PSBT with smartcard")
+                return Destination(PSBTFinalizeView)
+            raise
+        finally:
+            loading.stop()
+
+        if sig_cnt == PSBTParser.sig_count(trimmed_psbt):
+            # Signing failed / didn't do anything
+            if hasattr(self.controller, "_psbt_sign_retry_timeout"):
+                delattr(self.controller, "_psbt_sign_retry_timeout")
+
+            if self.controller.psbt_sign_with_satochip:
+                # If a timeout occurred during signing, offer to retry with a higher timeout
+                if sign_result and sign_result.timed_out:
+                    is_keycard = getattr(connector, "is_keycard_backend", False)
+                    current_timeout = (
+                        self.settings.get_value(SettingsConstants.SETTING__KEYCARD_SIGN_TIMEOUT)
+                        if is_keycard
+                        else self.settings.get_value(SettingsConstants.SETTING__SATOCHIP_SIGN_TIMEOUT)
+                    )
+                    card_label = "Keycard" if is_keycard else "Satochip"
+
+                    selected = self.run_screen(
+                        WarningScreen,
+                        title=_("Signing Timeout"),
+                        status_headline=None,
+                        text=(
+                            f"{card_label} signing timed out at {current_timeout}s.\n\n"
+                            "Retry with a higher timeout?"
+                        ),
+                        button_data=[ButtonOption("Retry (higher timeout)"), ButtonOption("Cancel")],
+                    )
+
+                    if selected == 0:
+                        self.controller._psbt_sign_retry_timeout = current_timeout + 0.75
+                        return Destination(PSBTFinalizeView)
+
+                return Destination(PSBTFinalizeView)
+
+            # TODO: Reserved for Nick. Are there different failure scenarios that we can detect?
+            # Would be nice to alter the message on the next screen w/more detail.
+            return Destination(PSBTSigningErrorView)
+
+        else:
+            self.controller.psbt = trimmed_psbt
+            self.controller.psbt_sign_with_satochip = False
+            return Destination(PSBTSignedQRDisplayView)
 
 
 
 class PSBTSignedQRDisplayView(View):
     def run(self):
         from seedsigner.models.encode_qr import UrPsbtQrEncoder
+
+        save_path = self.controller.psbt_microsd_save_path
+        if save_path:
+            # PSBT was loaded from the microSD (smartcard tools); write the signed
+            # result back alongside it.
+            signed_path = save_path.with_name(save_path.name + ".signed")
+            try:
+                signed_path.parent.mkdir(parents=True, exist_ok=True)
+                signed_path.write_bytes(self.controller.psbt.serialize())
+                try:
+                    display_path = str(signed_path.relative_to(MicroSD.get_microsd_dir()))
+                except ValueError:
+                    display_path = signed_path.name
+                self.run_screen(
+                    LargeIconStatusScreen,
+                    title=_("Success"),
+                    status_headline=None,
+                    text=_("Saved as {}.").format(display_path),
+                    show_back_button=False,
+                    button_data=[ButtonOption(_("Continue"))],
+                )
+            except Exception as e:
+                logger.exception("Failed to save signed PSBT", exc_info=e)
+                self.run_screen(
+                    WarningScreen,
+                    title=_("Error"),
+                    status_headline=None,
+                    text=_("Failed to save PSBT: {}").format(str(e)),
+                    show_back_button=False,
+                    button_data=[ButtonOption(_("OK"))],
+                )
+            finally:
+                self.controller.psbt_microsd_save_path = None
+                self.controller.psbt_from_microsd = False
+                self.controller.psbt_microsd_seed_warning_shown = False
 
         qr_encoder = UrPsbtQrEncoder(
             psbt=self.controller.psbt,

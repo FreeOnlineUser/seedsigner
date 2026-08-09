@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 from binascii import hexlify
 from embit import psbt, script, ec, bip32
@@ -20,10 +22,28 @@ class OPCODES:
 
 
 class PSBTParser():
-    def __init__(self, p: PSBT, seed: Seed, network: str = SettingsConstants.MAINNET):
+    def __init__(
+        self,
+        p: PSBT,
+        seed: Seed | None = None,
+        *,
+        root: bip32.HDKey | None = None,
+        root_path: list[int] | None = None,
+        master_fingerprint: bytes | None = None,
+        network: str = SettingsConstants.MAINNET,
+    ):
+        """
+            Normally parses against a loaded Seed. Alternatively a smartcard flow can
+            supply `root` (typically the card's account-level xpub), the `root_path`
+            it was derived at (PSBT derivations are trimmed by this prefix), and the
+            card's `master_fingerprint` for display purposes.
+        """
         self.psbt: PSBT = p
         self.seed = seed
         self.network = network
+        self.root = root
+        self.root_path = root_path or []
+        self.master_fingerprint = master_fingerprint
 
         self.policy = None
         self.spend_amount = 0
@@ -36,9 +56,7 @@ class PSBTParser():
         self.destination_amounts = []
         self.op_return_data: bytes = None
 
-        self.root = None
-
-        if self.seed is not None:
+        if self.seed is not None or self.root is not None:
             self.parse()
 
 
@@ -57,7 +75,7 @@ class PSBTParser():
         """
             Multisig psbts will have "m" and "n" defined in policy
         """
-        return "m" in self.policy
+        return isinstance(self.policy, dict) and "m" in self.policy
 
 
     @property
@@ -66,7 +84,10 @@ class PSBTParser():
 
 
     def _set_root(self):
-        self.root = bip32.HDKey.from_seed(self.seed.seed_bytes, version=NETWORKS[SettingsConstants.map_network_to_embit(self.network)]["xprv"])
+        if self.seed is not None:
+            self.root = bip32.HDKey.from_seed(self.seed.seed_bytes, version=NETWORKS[SettingsConstants.map_network_to_embit(self.network)]["xprv"])
+        elif self.root is None:
+            raise RuntimeError("No seed or root key available")
 
 
     def parse(self):
@@ -74,11 +95,8 @@ class PSBTParser():
             logger.info(f"self.psbt is None!!")
             return False
 
-        if not self.seed:
-            logger.info("self.seed is None!")
-            return False
-
-        self._set_root()
+        if self.seed is not None and self.root is None:
+            self._set_root()
 
         # Try to fix missing fingerprints before parsing
         self._fill_missing_fingerprints()
@@ -86,6 +104,11 @@ class PSBTParser():
         rt = self._parse_inputs()
         if rt == False:
             return False
+
+        if self.root is None and self.seed is None and not self.is_multisig:
+            # A parse with neither a seed nor a root key can only make sense for
+            # multisig (change verified against the wallet descriptor instead).
+            raise RuntimeError("No seed or root key available")
 
         rt = self._parse_outputs()
         if rt == False:
@@ -157,6 +180,9 @@ class PSBTParser():
                     # should be one or zero for single-key addresses
                     if len(out.bip32_derivations.values()) > 0:
                         der = list(out.bip32_derivations.values())[0].derivation
+                        # PSBT derivations are full paths from the master; when root
+                        # is an account-level key, derive from the relative remainder.
+                        der = der[len(self.root_path):]
                         my_pubkey = self.root.derive(der)
 
                     if self.policy["type"] == "p2pkh" and my_pubkey is not None:
@@ -177,7 +203,7 @@ class PSBTParser():
                     if len(out.taproot_bip32_derivations.values()) > 0:
                         # TODO: Support keys in taptree leaves
                         leaf_hashes, derivation = list(out.taproot_bip32_derivations.values())[0]
-                        der = derivation.derivation
+                        der = derivation.derivation[len(self.root_path):]
                         my_pubkey = self.root.derive(der)
                         sc = script.p2tr(my_pubkey)
 
@@ -431,7 +457,13 @@ class PSBTParser():
         """
         if not self.root:
             return 0
-        
+
+        if not self.root.is_private:
+            # Smartcard flows supply an account-level xpub; it can neither derive the
+            # full master paths in the PSBT (hardened components) nor supply the
+            # master fingerprint, so leave the PSBT untouched.
+            return 0
+
         def _fill_scope(scope: InputScope | OutputScope):
             """Helper function to fill missing fingerprints in a scope (input/output)"""
             signing_seed_fingerprint = self.root.child(0).fingerprint

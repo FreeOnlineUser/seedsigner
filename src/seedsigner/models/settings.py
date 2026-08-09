@@ -85,16 +85,24 @@ class Settings(Singleton):
             if value == "":
                 raise InvalidSettingsQRData(f"{abbreviated_name} cannot be empty")
 
-            # Parse multi-value settings; integer-ize where needed
+            # Parse multi-value settings; numeric-ize where needed.
+            # Use try/except instead of .isdigit() because .isdigit() returns
+            # True for non-ASCII Unicode digit characters (e.g. superscript ¹²³)
+            # that int()/float() cannot convert, causing a ValueError.
             if "," in value:
                 values_updated = []
                 for v in value.split(","):
-                    if v.isdigit():
-                        v = int(v)
+                    try:
+                        v = float(v) if "." in v else int(v)
+                    except ValueError:
+                        pass
                     values_updated.append(v)
                 value = values_updated
-            elif value.isdigit():
-                value = int(value)
+            else:
+                try:
+                    value = float(value) if "." in value else int(value)
+                except ValueError:
+                    pass
             
             # Replace abbreviated name with full attr_name
             settings_entry = SettingsDefinition.get_settings_entry_by_abbreviated_name(abbreviated_name)
