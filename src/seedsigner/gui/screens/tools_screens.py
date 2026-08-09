@@ -137,6 +137,12 @@ class ToolsImageEntropyFinalImageScreen(BaseScreen):
     def _run(self):
         instructions_font = Fonts.get_font(GUIConstants.get_body_font_name(), GUIConstants.get_button_font_size())
 
+        # Touch bar must be set BEFORE the frame push below: set_touch_bar_labels
+        # only regenerates the cached bar image, which is composited on the next
+        # show_image(). Setting it after would leave the previous screen's bar
+        # on the panel for this whole screen (there is no later frame push).
+        self._set_touch_bar('TOUCH_BAR_BACK_AND_OK')
+
         with self.renderer.lock:
             self.renderer.canvas.paste(self.final_image)
 
@@ -161,9 +167,7 @@ class ToolsImageEntropyFinalImageScreen(BaseScreen):
 
         # Touch: make the "< reshoot | accept >" prompt literal - tapping the
         # LEFT half of the image reshoots, the RIGHT half accepts (no dead
-        # zones). Bar: back = reshoot, check = accept (replaces the default
-        # nav bar, whose up/check/down reads as nonsense on this screen).
-        self._set_touch_bar('TOUCH_BAR_BACK_AND_OK')
+        # zones). Bar (set above, pre-render): back = reshoot, check = accept.
         if hasattr(self.hw_inputs, 'register_buttons'):
             from types import SimpleNamespace
             self.hw_inputs.register_buttons([
