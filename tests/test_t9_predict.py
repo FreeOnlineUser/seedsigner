@@ -85,3 +85,45 @@ class TestT9PredictiveMode(BaseTest):
             seq = T9Pad.word_to_key_seq(w)
             for cand in T9Pad.filter_words_by_key_seq(bip39.WORDLIST, seq):
                 assert T9Pad.word_to_key_seq(cand[:len(seq)]) == seq
+
+
+class TestKeyboardModeDispatch(BaseTest):
+    """
+    The T9 pads are tap-only, so the T9 keyboard modes must never dispatch on
+    hardware without touch input: a d-pad user would land on a screen they
+    cannot type on.
+    """
+
+    def _dispatched_screen(self, monkeypatch, touch_env):
+        import os
+        from seedsigner.gui.screens import seed_screens
+        from seedsigner.views import seed_views
+
+        if touch_env is None:
+            monkeypatch.delenv("SEEDSIGNER_TOUCH", raising=False)
+        else:
+            monkeypatch.setenv("SEEDSIGNER_TOUCH", touch_env)
+
+        self.controller.storage.init_pending_mnemonic(num_words=12)
+        view = seed_views.SeedMnemonicEntryView(cur_word_index=0)
+
+        captured = {}
+
+        def fake_run_screen(screen_cls, **kwargs):
+            captured["screen_cls"] = screen_cls
+            from seedsigner.gui.screens.screen import RET_CODE__BACK_BUTTON
+            return RET_CODE__BACK_BUTTON
+
+        view.run_screen = fake_run_screen
+        view.run()
+        return captured["screen_cls"]
+
+    def test_t9_predict_dispatches_t9_screen_on_touch(self, monkeypatch):
+        from seedsigner.gui.screens import seed_screens
+        screen_cls = self._dispatched_screen(monkeypatch, "1")
+        assert screen_cls is seed_screens.SeedMnemonicEntryT9Screen
+
+    def test_t9_predict_falls_back_to_standard_without_touch(self, monkeypatch):
+        from seedsigner.gui.screens import seed_screens
+        screen_cls = self._dispatched_screen(monkeypatch, None)
+        assert screen_cls is seed_screens.SeedMnemonicEntryScreen

@@ -1,4 +1,5 @@
 import logging
+import os
 import random
 import time
 
@@ -312,10 +313,13 @@ class SeedMnemonicEntryView(View):
 
 
     def run(self):
-        # Choose screen class based on keyboard mode setting
+        # Choose screen class based on keyboard mode setting. The T9 pads are
+        # tap-only (no d-pad navigation), so without touch input the standard
+        # keyboard always runs, regardless of the setting.
         keyboard_mode = self.settings.get_value(SettingsConstants.SETTING__KEYBOARD_MODE)
+        is_touch = os.environ.get('SEEDSIGNER_TOUCH') == '1'
         extra_kwargs = {}
-        if keyboard_mode in (SettingsConstants.KEYBOARD_MODE__T9, SettingsConstants.KEYBOARD_MODE__T9_PREDICT):
+        if is_touch and keyboard_mode in (SettingsConstants.KEYBOARD_MODE__T9, SettingsConstants.KEYBOARD_MODE__T9_PREDICT):
             screen_class = seed_screens.SeedMnemonicEntryT9Screen
             default_initial = [" "]  # T9 starts empty
             extra_kwargs["predictive"] = keyboard_mode == SettingsConstants.KEYBOARD_MODE__T9_PREDICT
