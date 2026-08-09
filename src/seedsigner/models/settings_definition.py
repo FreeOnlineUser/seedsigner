@@ -703,7 +703,7 @@ class SettingsDefinition:
                       type=SettingsConstants.TYPE__SELECT_1,
                       visibility=SettingsConstants.VISIBILITY__ADVANCED,
                       selection_options=SettingsConstants.ALL_KEYBOARD_MODES,
-                      default_value=SettingsConstants.KEYBOARD_MODE__STANDARD),
+                      default_value=SettingsConstants.KEYBOARD_MODE__T9_PREDICT),
 
         SettingsEntry(category=SettingsConstants.CATEGORY__FEATURES,
                       attr_name=SettingsConstants.SETTING__MESSAGE_SIGNING,
