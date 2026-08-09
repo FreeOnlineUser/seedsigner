@@ -19,8 +19,9 @@ class ToolsImageEntropyLivePreviewScreen(BaseScreen):
     def __post_init__(self):
         super().__post_init__()
 
-        # Set touch bar for camera mode (back button on left)
-        self._set_touch_bar('TOUCH_BAR_BACK')
+        # Touch bar for camera mode: back on the left, shutter in the middle.
+        # (Tapping the live preview itself also snaps; see check_for_low mapping.)
+        self._set_touch_bar('TOUCH_BAR_CAMERA')
 
         self.camera = Camera.get_instance()
 

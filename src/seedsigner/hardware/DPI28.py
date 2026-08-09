@@ -51,6 +51,7 @@ class TouchBarIcons:
     BACK = "\ue904"
     # From FontAwesome
     KEYBOARD = "\uf11c"
+    CAMERA = "\uf030"
 
 
 class DPI28:
@@ -99,6 +100,7 @@ class DPI28:
     TOUCH_BAR_KEYBOARD_BOTH_ACTIVE_DOWN_DISABLED = ((_DEL, _WORD, _DOWN), ('#ff9416', '#ff9416', '#444444'), ('seedsigner', 'seedsigner', 'seedsigner'))
     TOUCH_BAR_HIDDEN = (('', '', ''), ('#1a1a1a', '#1a1a1a', '#1a1a1a'), ('seedsigner', 'seedsigner', 'seedsigner'))
     TOUCH_BAR_BACK = ((_BACK, '', ''), ('#ff9416', '#1a1a1a', '#1a1a1a'), ('seedsigner', 'seedsigner', 'seedsigner'))
+    TOUCH_BAR_CAMERA = ((_BACK, TouchBarIcons.CAMERA, ''), ('#ff9416', '#ff9416', '#1a1a1a'), ('seedsigner', 'fontawesome', 'seedsigner'))
     TOUCH_BAR_BACK_AND_OK = ((_BACK, '', _SELECT), ('#ff9416', '#1a1a1a', '#ff9416'), ('seedsigner', 'seedsigner', 'seedsigner'))
     TOUCH_BAR_QR_BRIGHTNESS = ((_UP, _SELECT, _DOWN), ('#ff9416', '#ff9416', '#ff9416'), ('seedsigner', 'seedsigner', 'seedsigner'))
 

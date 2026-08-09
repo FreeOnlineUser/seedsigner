@@ -377,3 +377,64 @@ class TestCoordsToNavKeyCenterRelative:
         assert tb._coords_to_nav_key_center_relative(400, 560) == tb.KEY3
         for k in (tb.KEY1, tb.KEY2, tb.KEY3):
             assert k in HardwareButtonsConstants.KEYS__ANYCLICK
+
+
+class TestCheckForLowKeyAware:
+    """check_for_low() must honor the requested key(s), mapping the touch
+    position via _classify_tap: back corner / bar-left -> KEY1, bar-center ->
+    KEY2, bar-right -> KEY3, UI area -> KEY_PRESS. The old any-touch-matches-
+    any-query behavior made the camera preview unusable: its back check
+    consumed every tap before the snap check could run."""
+
+    def _make_buttons(self):
+        TouchButtons._instance = None
+        tb = TouchButtons.get_instance()
+        tb.touch = MagicMock()
+        return tb
+
+    def test_ui_tap_is_press_not_back(self):
+        """The camera-preview bug: a tap on the image must NOT read as back
+        (KEY_LEFT/KEY1) but MUST read as a snap (ANYCLICK)."""
+        tb = self._make_buttons()
+        tb.touch.poll.side_effect = [("down", 240, 300), None, None]
+        assert tb.check_for_low(HardwareButtonsConstants.KEY_LEFT) is False
+        assert tb.check_for_low(HardwareButtonsConstants.KEY1) is False
+        assert tb.check_for_low(keys=HardwareButtonsConstants.KEYS__ANYCLICK) is True
+
+    def test_back_corner_is_key1(self):
+        tb = self._make_buttons()
+        tb.touch.poll.side_effect = [("down", 30, 30), None]
+        assert tb.check_for_low(HardwareButtonsConstants.KEY1) is True
+
+    def test_touch_bar_left_is_key1(self):
+        tb = self._make_buttons()
+        tb.touch.poll.side_effect = [("down", 80, 560), None]
+        assert tb.check_for_low(HardwareButtonsConstants.KEY1) is True
+
+    def test_touch_bar_center_is_key2_snap(self):
+        """Bar-center (the camera glyph) is KEY2: not back, but in ANYCLICK."""
+        tb = self._make_buttons()
+        tb.touch.poll.side_effect = [("down", 240, 560), None, None]
+        assert tb.check_for_low(HardwareButtonsConstants.KEY1) is False
+        assert tb.check_for_low(keys=HardwareButtonsConstants.KEYS__ANYCLICK) is True
+
+    def test_release_clears_state(self):
+        tb = self._make_buttons()
+        tb.touch.poll.side_effect = [("down", 240, 300), ("up", 240, 300), None]
+        assert tb.check_for_low(keys=HardwareButtonsConstants.KEYS__ANYCLICK) is True
+        assert tb.check_for_low(keys=HardwareButtonsConstants.KEYS__ANYCLICK) is False
+        assert tb.check_for_low(HardwareButtonsConstants.KEY1) is False
+
+    def test_unkeyed_query_matches_any_touch(self):
+        tb = self._make_buttons()
+        tb.touch.poll.side_effect = [("down", 240, 300)]
+        assert tb.check_for_low() is True
+
+    def test_held_key_persists_across_polls(self):
+        """State must survive the event being consumed by an earlier query in
+        the same loop iteration (poll returns None on later calls)."""
+        tb = self._make_buttons()
+        tb.touch.poll.side_effect = [("down", 240, 560), None, None, None]
+        assert tb.check_for_low(HardwareButtonsConstants.KEY_RIGHT) is False
+        assert tb.check_for_low(HardwareButtonsConstants.KEY_LEFT) is False
+        assert tb.check_for_low(HardwareButtonsConstants.KEY2) is True

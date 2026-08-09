@@ -90,6 +90,7 @@ class TouchButtons(Singleton):
         self.last_touch_x = 0
         self.last_touch_y = 0
         self.touch_down = False
+        self._held_key = None  # Which key the current touch maps to (check_for_low)
 
         # Direct tap support
         # List of (x, y, width, height, index) in NATIVE coords (240x240)
@@ -403,6 +404,7 @@ class TouchButtons(Singleton):
 
                 if event_type == 'down':
                     self.touch_down = True
+                    self._held_key = None  # wait_for owns this touch; don't let check_for_low ghost-match it
                     self.last_touch_x = x
                     self.last_touch_y = y
 
@@ -476,6 +478,7 @@ class TouchButtons(Singleton):
 
                 elif event_type == 'up':
                     self.touch_down = False
+                    self._held_key = None
                     logger.debug(f"Release, pending_key: {pending_key}")
                     # Return the pending key on release
                     if pending_key is not None:
@@ -508,28 +511,63 @@ class TouchButtons(Singleton):
             event_type, x, y = event
             if event_type == 'down':
                 self.touch_down = True
+                self._held_key = self._classify_tap(x, y)
                 return True
             elif event_type == 'up':
                 self.touch_down = False
+                self._held_key = None
                 return True  # Return True on release too to wake from screensaver
         return self.touch_down
+
+    def _classify_tap(self, x: int, y: int) -> int:
+        """
+        Map a touch to the key it should count as for check_for_low():
+        back corner -> KEY1, touch bar thirds -> KEY1/KEY2/KEY3,
+        anywhere else in the UI area -> KEY_PRESS.
+        """
+        if self._check_back_button_tap(x, y):
+            return self.KEY1
+        if y >= self.TOUCH_BAR_TOP:
+            third = self.SCREEN_WIDTH // 3
+            if x < third:
+                return self.KEY1
+            elif x < 2 * third:
+                return self.KEY2
+            else:
+                return self.KEY3
+        return self.KEY_PRESS
 
     def check_for_low(self, key: int = None, keys: list = None) -> bool:
         """
         Check if specified key(s) are pressed.
-        For touch: checks if screen is currently being touched.
+
+        For touch, the current touch position maps to a key via _classify_tap()
+        and only a match on the requested key(s) returns True. (Previously ANY
+        touch matched ANY query, so screens polling back-then-snap could never
+        reach the snap check: every tap read as "back".)
         """
-        # For touch input, we check if there is an active touch
+        requested = set()
+        if key is not None:
+            requested.add(key)
+        if keys:
+            requested.update(keys)
+
         event = self.touch.poll()
         if event:
             event_type, x, y = event
             if event_type == "down":
                 self.touch_down = True
+                self._held_key = self._classify_tap(x, y)
                 self.update_last_input_time()
-                return True
             elif event_type == "up":
                 self.touch_down = False
-        return self.touch_down
+                self._held_key = None
+
+        if not self.touch_down:
+            return False
+        if not requested:
+            return True
+        return self._held_key in requested
 
 
 
