@@ -56,6 +56,9 @@ class Settings(Singleton):
                 settings._data.get(SettingsConstants.SETTING__SMARTCARD_SUPPORT) == SettingsConstants.OPTION__ENABLED
             )
 
+            # The seed keyboard choice only exists on touch hardware
+            SettingsDefinition.update_touch_entry_visibility(os.environ.get('SEEDSIGNER_TOUCH') == '1')
+
         return cls._instance
 
 

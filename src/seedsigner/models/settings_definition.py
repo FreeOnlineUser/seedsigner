@@ -1037,6 +1037,16 @@ class SettingsDefinition:
     }
 
     @classmethod
+    def update_touch_entry_visibility(cls, is_touch: bool):
+        """
+            The T9 seed keyboards are tap-only, so the keyboard choice is meaningless
+            (and misleading) on hardware without touch input; hide it there.
+        """
+        entry = cls.get_settings_entry(SettingsConstants.SETTING__KEYBOARD_MODE)
+        entry.visibility = SettingsConstants.VISIBILITY__ADVANCED if is_touch else SettingsConstants.VISIBILITY__HIDDEN
+
+
+    @classmethod
     def update_smartcard_entry_visibility(cls, is_smartcard_enabled: bool):
         """
             Shows/hides the smartcard sub-settings based on the master gate, following

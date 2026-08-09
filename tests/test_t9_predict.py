@@ -127,3 +127,20 @@ class TestKeyboardModeDispatch(BaseTest):
         from seedsigner.gui.screens import seed_screens
         screen_cls = self._dispatched_screen(monkeypatch, None)
         assert screen_cls is seed_screens.SeedMnemonicEntryScreen
+
+    def test_keyboard_mode_setting_hidden_without_touch(self):
+        import os
+        from seedsigner.models.settings_definition import SettingsConstants, SettingsDefinition
+
+        # Settings.get_instance() (run by test setup) syncs visibility from the env
+        entry = SettingsDefinition.get_settings_entry(SettingsConstants.SETTING__KEYBOARD_MODE)
+        if os.environ.get("SEEDSIGNER_TOUCH") == "1":
+            assert entry.visibility == SettingsConstants.VISIBILITY__ADVANCED
+        else:
+            assert entry.visibility == SettingsConstants.VISIBILITY__HIDDEN
+
+        # And the sync helper flips it both ways
+        SettingsDefinition.update_touch_entry_visibility(True)
+        assert entry.visibility == SettingsConstants.VISIBILITY__ADVANCED
+        SettingsDefinition.update_touch_entry_visibility(False)
+        assert entry.visibility == SettingsConstants.VISIBILITY__HIDDEN
