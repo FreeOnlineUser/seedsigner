@@ -1,4 +1,4 @@
-# SeedSigner — Touchscreen Build
+# SeedSigner Touchscreen Build
 
 A personal fork of [SeedSigner](https://github.com/SeedSigner/seedsigner) rebuilt
 around a capacitive touchscreen: direct tap input everywhere, a T9-style seed
@@ -28,16 +28,16 @@ See also [SeedSigner/seedsigner-os#104](https://github.com/SeedSigner/seedsigner
 - **T9 seed word entry**, three selectable modes (Settings → Advanced → Seed
   keyboard). The default, **T9 predict**, is one tap per key: candidates
   matching the tapped key sequence rank in a side list, keys with no valid
-  BIP-39 continuation go dark, and most words take 3–4 taps plus a confirm.
+  BIP-39 continuation go dark, and most words take 3-4 taps plus a confirm.
   Classic multi-tap T9 (constrained to valid continuations) and the upstream
   d-pad keyboard remain available.
 - **BIP-85 child seeds.** Derived children auto-import with their real child
-  index and full lineage in the seed label — `(c1)(c21)` for a
-  child-of-a-child — so a mislabeled child can't point at the wrong recovery
+  index and full lineage in the seed label (`(c1)(c21)` for a
+  child-of-a-child), so a mislabeled child can't point at the wrong recovery
   path.
 - **SeedQR transcription QoL.** The zoomed transcription view pans toward
   wherever you tap, and the screensaver stays off while you copy.
-- Every BIP-39 word is provably reachable on the predictive keyboard — the test
+- Every BIP-39 word is provably reachable on the predictive keyboard: the test
   suite walks all 2048 words for dead ends (`tests/test_t9_predict.py`).
 
 ## Building
