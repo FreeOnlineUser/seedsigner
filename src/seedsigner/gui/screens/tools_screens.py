@@ -1,3 +1,4 @@
+import os
 import time
 
 from dataclasses import dataclass
@@ -78,8 +79,12 @@ class ToolsImageEntropyLivePreviewScreen(BaseScreen):
 
                 self.renderer.canvas.paste(frame.crop(box=box))
 
-            # Check for ANYCLICK to take final entropy image
-            if self.hw_inputs.check_for_low(keys=HardwareButtonsConstants.KEYS__ANYCLICK):
+            # Check for a snap: tap on the image, bar shutter, or d-pad click.
+            # KEY1 is deliberately NOT in this set: it's the back control on this
+            # screen, and because either check may consume a given touch event,
+            # overlapping key sets raced - a back tap landing mid-frame-paste was
+            # claimed by this check and triggered a capture instead of exiting.
+            if self.hw_inputs.check_for_low(keys=[HardwareButtonsConstants.KEY_PRESS, HardwareButtonsConstants.KEY2, HardwareButtonsConstants.KEY3]):
                 # Have to manually update last input time since we're not in a wait_for loop
                 self.hw_inputs.update_last_input_time()
                 self.camera.stop_video_stream_mode()
@@ -154,9 +159,16 @@ class ToolsImageEntropyFinalImageScreen(BaseScreen):
             )
             self.renderer.show_image()
 
-        # LEFT = reshoot, RIGHT / ANYCLICK = accept
+        # Touch bar: back = reshoot, check = accept (replaces the stale camera
+        # bar inherited from the live preview)
+        self._set_touch_bar('TOUCH_BAR_BACK_AND_OK')
+
+        # LEFT / bar-back / corner-back = reshoot; RIGHT / image tap / bar-check = accept
         input = self.hw_inputs.wait_for([HardwareButtonsConstants.KEY_LEFT, HardwareButtonsConstants.KEY_RIGHT] + HardwareButtonsConstants.KEYS__ANYCLICK)
-        if input == HardwareButtonsConstants.KEY_LEFT:
+        corner_back = hasattr(self.hw_inputs, 'was_back_button_tapped') and self.hw_inputs.was_back_button_tapped()
+        if (input == HardwareButtonsConstants.KEY_LEFT
+                or corner_back
+                or (input == HardwareButtonsConstants.KEY1 and os.environ.get('SEEDSIGNER_TOUCH') == '1')):
             return RET_CODE__BACK_BUTTON
 
 

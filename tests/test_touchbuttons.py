@@ -438,3 +438,81 @@ class TestCheckForLowKeyAware:
         assert tb.check_for_low(HardwareButtonsConstants.KEY_RIGHT) is False
         assert tb.check_for_low(HardwareButtonsConstants.KEY_LEFT) is False
         assert tb.check_for_low(HardwareButtonsConstants.KEY2) is True
+
+
+class TestCheckForLowTapLatch:
+    """A quick tap's down/up events can each be consumed by DIFFERENT
+    check_for_low calls (the camera preview polls back keys, then pastes a
+    frame, then polls snap keys). An unclaimed tap must latch so the query
+    that asks for its key still fires - otherwise back taps landing mid-paste
+    were lost or, worse, matched by the overlapping snap set."""
+
+    KEYS_SNAP = [
+        HardwareButtonsConstants.KEY_PRESS,
+        HardwareButtonsConstants.KEY2,
+        HardwareButtonsConstants.KEY3,
+    ]
+
+    def _make_buttons(self):
+        TouchButtons._instance = None
+        tb = TouchButtons.get_instance()
+        tb.touch = MagicMock()
+        return tb
+
+    def _preview_iteration(self, tb):
+        """One iteration of the camera preview loop's polling order."""
+        back = (tb.check_for_low(HardwareButtonsConstants.KEY_LEFT)
+                or tb.check_for_low(HardwareButtonsConstants.KEY1))
+        snap = tb.check_for_low(keys=self.KEYS_SNAP)
+        return back, snap
+
+    def test_quick_back_tap_consumed_by_snap_check_still_exits(self):
+        """Down lands in the snap check's poll, up in the next back check:
+        the back tap must still register (this was 'there is no exit')."""
+        tb = self._make_buttons()
+        # iter1: back checks see nothing; snap check consumes the bar-left DOWN
+        tb.touch.poll.side_effect = [None, None, ("down", 80, 560),
+                                     ("up", 80, 560), None, None]
+        back, snap = self._preview_iteration(tb)
+        assert back is False
+        assert snap is False  # KEY1 not in the snap set: no phantom capture
+        # iter2: back check consumes the UP -> latched tap must fire as back
+        back, snap = self._preview_iteration(tb)
+        assert back is True
+        assert snap is False
+
+    def test_quick_snap_tap_fires_once_only(self):
+        """An image tap that matches while held must NOT re-fire via the latch."""
+        tb = self._make_buttons()
+        tb.touch.poll.side_effect = [("down", 240, 300), None, None,
+                                     ("up", 240, 300), None, None]
+        back, snap = self._preview_iteration(tb)
+        assert back is False
+        assert snap is True
+        back, snap = self._preview_iteration(tb)
+        assert back is False
+        assert snap is False
+
+    def test_bar_shutter_tap_snaps(self):
+        """Bar-center (camera glyph) quick tap: down consumed by back checks,
+        up by snap check - must still snap exactly once."""
+        tb = self._make_buttons()
+        tb.touch.poll.side_effect = [("down", 240, 560), ("up", 240, 560),
+                                     None, None, None, None]
+        back, snap = self._preview_iteration(tb)
+        assert back is False
+        assert snap is True
+        back, snap = self._preview_iteration(tb)
+        assert (back, snap) == (False, False)
+
+    def test_latched_tap_expires_on_new_touch(self):
+        """A stale unclaimed latch is replaced by the next touch."""
+        tb = self._make_buttons()
+        tb.touch.poll.side_effect = [("down", 240, 560), ("up", 240, 560),
+                                     ("down", 30, 30), None]
+        # KEY2 tap latches (query never asks for it)
+        assert tb.check_for_low(HardwareButtonsConstants.KEY_LEFT) is False
+        assert tb.check_for_low(HardwareButtonsConstants.KEY_LEFT) is False
+        # New corner touch replaces the stale KEY2 latch; KEY1 matches held
+        assert tb.check_for_low(HardwareButtonsConstants.KEY1) is True
+        assert tb.check_for_low(HardwareButtonsConstants.KEY2) is False

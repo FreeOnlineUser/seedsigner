@@ -90,7 +90,9 @@ class TouchButtons(Singleton):
         self.last_touch_x = 0
         self.last_touch_y = 0
         self.touch_down = False
-        self._held_key = None  # Which key the current touch maps to (check_for_low)
+        self._held_key = None      # Which key the current touch maps to (check_for_low)
+        self._held_claimed = False  # A check_for_low query matched the held key
+        self._tap_latch = None     # Completed-but-unclaimed tap awaiting its matching query
 
         # Direct tap support
         # List of (x, y, width, height, index) in NATIVE coords (240x240)
@@ -404,7 +406,9 @@ class TouchButtons(Singleton):
 
                 if event_type == 'down':
                     self.touch_down = True
-                    self._held_key = None  # wait_for owns this touch; don't let check_for_low ghost-match it
+                    # wait_for owns this touch; don't let check_for_low ghost-match it
+                    self._held_key = None
+                    self._tap_latch = None
                     self.last_touch_x = x
                     self.last_touch_y = y
 
@@ -479,6 +483,7 @@ class TouchButtons(Singleton):
                 elif event_type == 'up':
                     self.touch_down = False
                     self._held_key = None
+                    self._tap_latch = None
                     logger.debug(f"Release, pending_key: {pending_key}")
                     # Return the pending key on release
                     if pending_key is not None:
@@ -558,16 +563,31 @@ class TouchButtons(Singleton):
             if event_type == "down":
                 self.touch_down = True
                 self._held_key = self._classify_tap(x, y)
+                self._held_claimed = False
+                self._tap_latch = None
                 self.update_last_input_time()
             elif event_type == "up":
+                # A quick tap's down/up events may each be consumed by DIFFERENT
+                # check_for_low calls (screens poll several key sets per loop).
+                # If no query matched while the touch was down, latch the tap so
+                # the query that DOES ask for its key still sees it.
+                if self.touch_down and not self._held_claimed:
+                    self._tap_latch = self._held_key
                 self.touch_down = False
                 self._held_key = None
+
+        if self._tap_latch is not None and (not requested or self._tap_latch in requested):
+            self._tap_latch = None
+            return True
 
         if not self.touch_down:
             return False
         if not requested:
             return True
-        return self._held_key in requested
+        if self._held_key in requested:
+            self._held_claimed = True
+            return True
+        return False
 
 
 
