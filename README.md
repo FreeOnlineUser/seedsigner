@@ -14,6 +14,7 @@ word keyboard, and BIP-85 child seed workflows.
 - Raspberry Pi Zero
 - Waveshare 2.8" DPI capacitive touchscreen (480×640, Goodix GT911 touch)
 - Pi Camera module
+- (optional) USB CCID smartcard reader + OTG adapter, for the smartcard features
 
 Display + touch bring-up for this panel is documented in
 [`DISPLAY_SETUP.md`](DISPLAY_SETUP.md), with boot config, dtoverlays and setup
@@ -40,6 +41,14 @@ See also [SeedSigner/seedsigner-os#104](https://github.com/SeedSigner/seedsigner
   photo to reshoot or accept. QR scanning keeps tap-anywhere-to-cancel.
 - **SeedQR transcription QoL.** The zoomed transcription view pans toward
   wherever you tap, and the screensaver stays off while you copy.
+- **Smartcard support, off by default.** A port of
+  [3rdIteration](https://github.com/3rdIteration/seedsigner)'s Satochip and
+  Seedkeeper feature set: sign PSBTs on a Satochip or Keycard, back up and
+  restore seeds with a Seedkeeper, plus card admin tools, all through a USB
+  CCID card reader on an OTG adapter. Everything sits behind Settings →
+  Advanced → Smartcard support; with the gate off (the default) no smartcard
+  code is loaded and no menu entries appear, which the test suite asserts
+  (`tests/test_smartcard_dormancy.py`).
 - Every BIP-39 word is provably reachable on the predictive keyboard: the test
   suite walks all 2048 words for dead ends (`tests/test_t9_predict.py`).
 
@@ -65,5 +74,9 @@ image, or the splash screen will crash.
 A direct fork of [SeedSigner/seedsigner](https://github.com/SeedSigner/seedsigner),
 kept in sync with its `dev` branch (last merged August 2026). Early BIP-85
 groundwork came from jdlcdl's fork; BIP-85 has since landed upstream.
+Smartcard support is ported from
+[3rdIteration/seedsigner](https://github.com/3rdIteration/seedsigner); the
+card protocol layer is Satochip's LGPL
+[pysatochip](https://github.com/Toporin/pysatochip) library.
 
 License: MIT, same as upstream.
