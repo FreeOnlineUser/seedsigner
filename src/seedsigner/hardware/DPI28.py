@@ -20,7 +20,10 @@ import logging
 import os
 import mmap
 import fcntl
+from dataclasses import dataclass
 from PIL import Image, ImageDraw, ImageFont
+
+from seedsigner.hardware.displays.display_driver import BaseDisplayDriver
 
 logger = logging.getLogger(__name__)
 
@@ -54,15 +57,21 @@ class TouchBarIcons:
     CAMERA = "\uf030"
 
 
-class DPI28:
+@dataclass
+class DPI28(BaseDisplayDriver):
     """
     Framebuffer display driver for Waveshare 2.8" DPI LCD.
 
     Accepts 240x240 images (SeedSigner native), scales to 480x480,
     and adds a 160px touch bar at the bottom.
-    
+
     Uses mmap for fast framebuffer writes and handles RGB→BGR conversion
     required by the Raspberry Pi framebuffer.
+
+    Note that self._width and self._height are provided by the parent
+    BaseDisplayDriver class and are set during instantiation via the
+    DisplayDriverFactory (always the 240x240 native UI size; the panel's
+    physical 480x640 layout is internal to this driver).
     """
 
     # Native UI size (what SeedSigner renders)
@@ -104,20 +113,13 @@ class DPI28:
     TOUCH_BAR_BACK_AND_OK = ((_BACK, '', _SELECT), ('#ff9416', '#1a1a1a', '#ff9416'), ('seedsigner', 'seedsigner', 'seedsigner'))
     TOUCH_BAR_QR_BRIGHTNESS = ((_UP, _SELECT, _DOWN), ('#ff9416', '#ff9416', '#ff9416'), ('seedsigner', 'seedsigner', 'seedsigner'))
 
-    def __init__(self, device_no: int = 0):
-        """
-        Initialize the framebuffer display.
+    # Framebuffer device number (0 for /dev/fb0)
+    device_no: int = 0
 
-        Args:
-            device_no: Framebuffer device number (0 for /dev/fb0)
-        """
-        # Report 240x240 to SeedSigner (native rendering size)
-        self.width = self.NATIVE_WIDTH
-        self.height = self.NATIVE_HEIGHT
-
-        self.device_no = device_no
-        self.fb_path = f"/dev/fb{device_no}"
-        self.config_dir = f"/sys/class/graphics/fb{device_no}/"
+    def __post_init__(self):
+        """Initialize the framebuffer display."""
+        self.fb_path = f"/dev/fb{self.device_no}"
+        self.config_dir = f"/sys/class/graphics/fb{self.device_no}/"
         
         self.fb = None
         self.fb_file = None
@@ -292,7 +294,7 @@ class DPI28:
 
         return bar
 
-    def show_image(self, image: Image.Image, x: int = 0, y: int = 0):
+    def show_image(self, image: Image.Image, x_start: int = 0, y_start: int = 0):
         """
         Display a PIL Image on the screen.
 
@@ -300,8 +302,8 @@ class DPI28:
 
         Args:
             image: PIL Image (240x240) to display
-            x: X offset (ignored for now)
-            y: Y offset (ignored for now)
+            x_start: X offset (ignored for now)
+            y_start: Y offset (ignored for now)
         """
         if not self.fb:
             return
@@ -430,6 +432,10 @@ class DPI28:
         if self.fb_file:
             self.fb_file.close()
             self.fb_file = None
+
+    def cleanup(self):
+        """BaseDisplayDriver hook, called when the Renderer swaps display drivers"""
+        self.close()
 
     def __del__(self):
         self.close()

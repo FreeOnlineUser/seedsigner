@@ -24,7 +24,7 @@ class TestWrite32bitPython:
     def _make_driver(self):
         """Create a DPI28 instance with framebuffer init disabled."""
         with patch.object(DPI28, '_init_framebuffer'):
-            driver = DPI28()
+            driver = DPI28(_width=DPI28.NATIVE_WIDTH, _height=DPI28.NATIVE_HEIGHT)
             # Set up a BytesIO as the fake framebuffer
             driver.fb = BytesIO(bytearray(480 * 640 * 4))
             driver.length = 480 * 640 * 4
@@ -128,7 +128,7 @@ class TestWrite16bitPython:
 
     def _make_driver(self):
         with patch.object(DPI28, '_init_framebuffer'):
-            driver = DPI28()
+            driver = DPI28(_width=DPI28.NATIVE_WIDTH, _height=DPI28.NATIVE_HEIGHT)
             driver.bits_per_pixel = 16
             return driver
 
@@ -193,7 +193,7 @@ class TestReadConfig:
 
     def _make_driver(self):
         with patch.object(DPI28, '_init_framebuffer'):
-            return DPI28()
+            return DPI28(_width=DPI28.NATIVE_WIDTH, _height=DPI28.NATIVE_HEIGHT)
 
     def test_parse_virtual_size(self):
         """Parses '480,640' into [480, 640]."""
@@ -222,7 +222,7 @@ class TestShowImageScaling:
 
     def _make_driver(self):
         with patch.object(DPI28, '_init_framebuffer'):
-            driver = DPI28()
+            driver = DPI28(_width=DPI28.NATIVE_WIDTH, _height=DPI28.NATIVE_HEIGHT)
             driver.fb = BytesIO(bytearray(480 * 640 * 4))
             driver.length = 480 * 640 * 4
             driver.bits_per_pixel = 32
@@ -258,7 +258,7 @@ class TestTouchBarCache:
 
     def _make_driver(self):
         with patch.object(DPI28, '_init_framebuffer'):
-            return DPI28()
+            return DPI28(_width=DPI28.NATIVE_WIDTH, _height=DPI28.NATIVE_HEIGHT)
 
     def test_same_preset_returns_cached(self):
         """Same preset returns the same cached image object."""
@@ -301,7 +301,7 @@ class TestDriverConstants:
 
     def _make_driver(self):
         with patch.object(DPI28, '_init_framebuffer'):
-            return DPI28()
+            return DPI28(_width=DPI28.NATIVE_WIDTH, _height=DPI28.NATIVE_HEIGHT)
 
     def test_native_dimensions(self):
         """Driver reports 240x240 native size to SeedSigner."""

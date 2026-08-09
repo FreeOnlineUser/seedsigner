@@ -69,6 +69,7 @@ class SeedMnemonicEntryScreen(BaseTopNavScreen):
                 GUIConstants.EDGE_PADDING + self.keyboard_width,
                 self.canvas_height
             ),
+            additional_keys=[Keyboard.KEY_BACKSPACE_4],
             auto_wrap=[Keyboard.WRAP_LEFT, Keyboard.WRAP_RIGHT]
         )
 
@@ -267,7 +268,7 @@ class SeedMnemonicEntryScreen(BaseTopNavScreen):
     def _update_touch_bar(self):
         """Update touch bar based on whether there's content to delete, words to select, and scroll position"""
         disp = self.renderer.disp
-        if hasattr(disp, 'display') and hasattr(disp.display, 'set_touch_bar_labels'):
+        if hasattr(disp, 'set_touch_bar_labels'):
             from seedsigner.hardware.DPI28 import DPI28
             # DEL is active (orange) if there's content to delete (not just empty space)
             has_content = len(self.letters) > 1 or (len(self.letters) == 1 and self.letters[0] != " ")
@@ -278,27 +279,27 @@ class SeedMnemonicEntryScreen(BaseTopNavScreen):
 
             if has_words and has_content:
                 if can_scroll_down:
-                    disp.display.set_touch_bar_labels(DPI28.TOUCH_BAR_KEYBOARD_BOTH_ACTIVE)
+                    disp.set_touch_bar_labels(DPI28.TOUCH_BAR_KEYBOARD_BOTH_ACTIVE)
                 else:
-                    disp.display.set_touch_bar_labels(DPI28.TOUCH_BAR_KEYBOARD_BOTH_ACTIVE_DOWN_DISABLED)
+                    disp.set_touch_bar_labels(DPI28.TOUCH_BAR_KEYBOARD_BOTH_ACTIVE_DOWN_DISABLED)
             elif has_words:
                 if can_scroll_down:
-                    disp.display.set_touch_bar_labels(DPI28.TOUCH_BAR_KEYBOARD_WORD_ACTIVE)
+                    disp.set_touch_bar_labels(DPI28.TOUCH_BAR_KEYBOARD_WORD_ACTIVE)
                 else:
                     # At bottom with words but no content - WORD active, down grey
-                    disp.display.set_touch_bar_labels(DPI28.TOUCH_BAR_KEYBOARD_BOTH_ACTIVE_DOWN_DISABLED)
+                    disp.set_touch_bar_labels(DPI28.TOUCH_BAR_KEYBOARD_BOTH_ACTIVE_DOWN_DISABLED)
             elif has_content:
-                disp.display.set_touch_bar_labels(DPI28.TOUCH_BAR_KEYBOARD_DEL_ACTIVE)
+                disp.set_touch_bar_labels(DPI28.TOUCH_BAR_KEYBOARD_DEL_ACTIVE)
             else:
-                disp.display.set_touch_bar_labels(DPI28.TOUCH_BAR_KEYBOARD_DOWN_DISABLED)
+                disp.set_touch_bar_labels(DPI28.TOUCH_BAR_KEYBOARD_DOWN_DISABLED)
 
 
     def _reset_touch_bar(self):
         """Reset touch bar to default labels when leaving keyboard screen"""
         disp = self.renderer.disp
-        if hasattr(disp, 'display') and hasattr(disp.display, 'set_touch_bar_labels'):
+        if hasattr(disp, 'set_touch_bar_labels'):
             from seedsigner.hardware.DPI28 import DPI28
-            disp.display.set_touch_bar_labels(DPI28.TOUCH_BAR_DEFAULT)
+            disp.set_touch_bar_labels(DPI28.TOUCH_BAR_DEFAULT)
 
 
     def _run(self):
@@ -754,7 +755,7 @@ class SeedMnemonicEntryT9Screen(BaseTopNavScreen):
     def _update_touch_bar(self):
         """Update touch bar based on current state."""
         disp = self.renderer.disp
-        if hasattr(disp, 'display') and hasattr(disp.display, 'set_touch_bar_labels'):
+        if hasattr(disp, 'set_touch_bar_labels'):
             from seedsigner.hardware.DPI28 import DPI28
             has_content = len(self.letters) > 1 or (len(self.letters) == 1 and self.letters[0] != " ")
             has_words = bool(self.possible_words)
@@ -762,24 +763,24 @@ class SeedMnemonicEntryT9Screen(BaseTopNavScreen):
 
             if has_words and has_content:
                 if can_scroll_down:
-                    disp.display.set_touch_bar_labels(DPI28.TOUCH_BAR_KEYBOARD_BOTH_ACTIVE)
+                    disp.set_touch_bar_labels(DPI28.TOUCH_BAR_KEYBOARD_BOTH_ACTIVE)
                 else:
-                    disp.display.set_touch_bar_labels(DPI28.TOUCH_BAR_KEYBOARD_BOTH_ACTIVE_DOWN_DISABLED)
+                    disp.set_touch_bar_labels(DPI28.TOUCH_BAR_KEYBOARD_BOTH_ACTIVE_DOWN_DISABLED)
             elif has_words:
                 if can_scroll_down:
-                    disp.display.set_touch_bar_labels(DPI28.TOUCH_BAR_KEYBOARD_WORD_ACTIVE)
+                    disp.set_touch_bar_labels(DPI28.TOUCH_BAR_KEYBOARD_WORD_ACTIVE)
                 else:
-                    disp.display.set_touch_bar_labels(DPI28.TOUCH_BAR_KEYBOARD_BOTH_ACTIVE_DOWN_DISABLED)
+                    disp.set_touch_bar_labels(DPI28.TOUCH_BAR_KEYBOARD_BOTH_ACTIVE_DOWN_DISABLED)
             elif has_content:
-                disp.display.set_touch_bar_labels(DPI28.TOUCH_BAR_KEYBOARD_DEL_ACTIVE)
+                disp.set_touch_bar_labels(DPI28.TOUCH_BAR_KEYBOARD_DEL_ACTIVE)
             else:
-                disp.display.set_touch_bar_labels(DPI28.TOUCH_BAR_KEYBOARD_DOWN_DISABLED)
+                disp.set_touch_bar_labels(DPI28.TOUCH_BAR_KEYBOARD_DOWN_DISABLED)
 
     def _reset_touch_bar(self):
         disp = self.renderer.disp
-        if hasattr(disp, 'display') and hasattr(disp.display, 'set_touch_bar_labels'):
+        if hasattr(disp, 'set_touch_bar_labels'):
             from seedsigner.hardware.DPI28 import DPI28
-            disp.display.set_touch_bar_labels(DPI28.TOUCH_BAR_DEFAULT)
+            disp.set_touch_bar_labels(DPI28.TOUCH_BAR_DEFAULT)
 
     def _update_pad_active_letters(self):
         """
@@ -1229,6 +1230,7 @@ class SeedBIP85SelectChildIndexScreen(KeyboardScreen):
         self.cols = 5
         self.keys_charset = "0123456789"
         self.show_save_button = True
+        self.custom_additional_keys = [Keyboard.KEY_BACKSPACE_5]
 
         super().__post_init__()
 
@@ -1263,6 +1265,7 @@ class SeedExportXpubCustomDerivationScreen(KeyboardScreen):
         self.cols = 6
         self.keys_charset = "/'0123456789"
         self.show_save_button = True
+        self.custom_additional_keys = [Keyboard.KEY_BACKSPACE_6]
 
         super().__post_init__()
 
@@ -1441,7 +1444,7 @@ class SeedAddPassphraseScreen(BaseTopNavScreen):
                 Keyboard.KEY_SPACE_2,
                 Keyboard.KEY_CURSOR_LEFT,
                 Keyboard.KEY_CURSOR_RIGHT,
-                Keyboard.KEY_BACKSPACE
+                Keyboard.KEY_BACKSPACE_2
             ],
             auto_wrap=[Keyboard.WRAP_LEFT, Keyboard.WRAP_RIGHT],
             render_now=False
@@ -1462,7 +1465,7 @@ class SeedAddPassphraseScreen(BaseTopNavScreen):
                 Keyboard.KEY_SPACE_2,
                 Keyboard.KEY_CURSOR_LEFT,
                 Keyboard.KEY_CURSOR_RIGHT,
-                Keyboard.KEY_BACKSPACE
+                Keyboard.KEY_BACKSPACE_2
             ],
             auto_wrap=[Keyboard.WRAP_LEFT, Keyboard.WRAP_RIGHT],
             render_now=False
@@ -1524,9 +1527,9 @@ class SeedAddPassphraseScreen(BaseTopNavScreen):
 
         # Hide touch bar - this screen has its own side panel buttons
         disp = self.renderer.disp
-        if hasattr(disp, 'display') and hasattr(disp.display, 'set_touch_bar_labels'):
+        if hasattr(disp, 'set_touch_bar_labels'):
             from seedsigner.hardware.DPI28 import DPI28
-            disp.display.set_touch_bar_labels(DPI28.TOUCH_BAR_HIDDEN)
+            disp.set_touch_bar_labels(DPI28.TOUCH_BAR_HIDDEN)
 
         # Change from the default lowercase keyboard for the screenshot generator
         if self.initial_keyboard == self.KEYBOARD__UPPERCASE_BUTTON_TEXT:

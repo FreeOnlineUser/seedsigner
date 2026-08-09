@@ -5,8 +5,7 @@ from threading import Lock
 
 logger = logging.getLogger(__name__)
 
-from seedsigner.hardware.displays.display_driver import ALL_DISPLAY_TYPES, DISPLAY_TYPE__DPI28, DISPLAY_TYPE__ILI9341, DISPLAY_TYPE__ILI9486, DISPLAY_TYPE__ST7789, DisplayDriver
-# Note: ili9341 import removed - was causing crash on ST7789/DPI28 due to RPi.GPIO import at module level
+from seedsigner.hardware.displays.display_driver import ALL_DISPLAY_TYPES, DISPLAY_TYPE__DPI28, DISPLAY_TYPE__ILI9341, DISPLAY_TYPE__ILI9486, DISPLAY_TYPE__ST7789, DisplayDriverFactory
 from seedsigner.models.settings import Settings
 from seedsigner.models.settings_definition import SettingsConstants
 from seedsigner.models.singleton import ConfigurableSingleton
@@ -129,7 +128,12 @@ class Renderer(ConfigurableSingleton):
                 raise Exception(f"Invalid display type: {self.display_type}")
 
             width, height = display_config.split("_")[1].split("x")
-            self.disp = DisplayDriver(self.display_type, width=int(width), height=int(height))
+
+            if self.disp:
+                # Existing instances might need to close resources like pwm
+                self.disp.cleanup()
+
+            self.disp = DisplayDriverFactory.instantiate_display_driver(self.display_type, width=int(width), height=int(height))
 
             if Settings.get_instance().get_value(SettingsConstants.SETTING__DISPLAY_COLOR_INVERTED, default_if_none=True) == SettingsConstants.OPTION__ENABLED:
                 self.disp.invert()
@@ -215,5 +219,5 @@ class Renderer(ConfigurableSingleton):
         Args:
             labels: Tuple from DPI28 touch bar presets (e.g., TOUCH_BAR_DEFAULT, TOUCH_BAR_KEYBOARD)
         """
-        if self.display_type == DISPLAY_TYPE__DPI28 and hasattr(self.disp.display, 'set_touch_bar_labels'):
-            self.disp.display.set_touch_bar_labels(labels)
+        if self.display_type == DISPLAY_TYPE__DPI28 and hasattr(self.disp, 'set_touch_bar_labels'):
+            self.disp.set_touch_bar_labels(labels)

@@ -26,7 +26,7 @@ class PSBTSelectSeedView(View):
 
         if self.controller.psbt_seed:
              if PSBTParser.has_matching_input_fingerprint(psbt=self.controller.psbt, seed=self.controller.psbt_seed, network=self.settings.get_value(SettingsConstants.SETTING__NETWORK)):
-                 # skip the seed prompt if a seed was previous selected and has matching input fingerprint
+                 # skip the seed prompt if a seed was previously selected and has matching input fingerprint
                  return Destination(PSBTOverviewView)
 
         seeds = self.controller.storage.seeds
@@ -58,7 +58,7 @@ class PSBTSelectSeedView(View):
 
         if len(seeds) > 0 and selected_menu_num < len(seeds):
             # User selected one of the n seeds
-            self.controller.psbt_seed = self.controller.get_seed(selected_menu_num)
+            self.controller.psbt_seed = seeds[selected_menu_num]
             return Destination(PSBTOverviewView)
         
         # The remaining flows are a sub-flow; resume PSBT flow once the seed is loaded.

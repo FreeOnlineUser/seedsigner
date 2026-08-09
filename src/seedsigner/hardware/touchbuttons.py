@@ -384,10 +384,9 @@ class TouchButtons(Singleton):
             if timeout_ms > 0 and cur_time - wait_start >= timeout_ms:
                 return None
 
-            # Screensaver check (respect a View opting out, e.g. SeedQR transcription)
-            active_view_allows_screensaver = getattr(controller.active_view, "allow_screensaver", True)
+            # Screensaver check (a View may opt out, e.g. SeedQR transcription)
             if (cur_time - self.last_input_time > controller.screensaver_activation_ms
-                    and not controller.is_screensaver_running and active_view_allows_screensaver):
+                    and controller.is_screensaver_start_allowed):
                 controller.start_screensaver()
                 self.update_last_input_time()
                 time.sleep(self.next_repeat_threshold / 1000.0)

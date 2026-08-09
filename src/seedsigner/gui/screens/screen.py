@@ -68,10 +68,10 @@ class BaseScreen(BaseComponent):
         if os.environ.get('SEEDSIGNER_TOUCH') != '1':
             return
         disp = self.renderer.disp
-        if hasattr(disp, 'display'):
-            preset = getattr(disp.display, preset_name, None)
+        if hasattr(disp, 'set_touch_bar_labels'):
+            preset = getattr(disp, preset_name, None)
             if preset is not None:
-                disp.display.set_touch_bar_labels(preset)
+                disp.set_touch_bar_labels(preset)
 
 
     def get_threads(self) -> List[BaseThread]:
@@ -1346,6 +1346,8 @@ class KeyboardScreen(BaseTopNavScreen):
     return_after_n_chars: int = None
     show_save_button: bool = False
     initial_value: str = ""
+    from dataclasses import dataclass, field
+    custom_additional_keys: dict = field(default_factory=lambda: Keyboard.ADDITIONAL_KEYS)    
 
     def __post_init__(self):
         if self.keyboard_font_size is None:
@@ -1404,6 +1406,7 @@ class KeyboardScreen(BaseTopNavScreen):
                 GUIConstants.EDGE_PADDING + self.keyboard_width,
                 keyboard_start_y + self.rows * self.key_height + (self.rows - 1) * 2
             ),
+            additional_keys=self.custom_additional_keys,
             auto_wrap=[Keyboard.WRAP_LEFT, Keyboard.WRAP_RIGHT],
             render_now=False
         )
