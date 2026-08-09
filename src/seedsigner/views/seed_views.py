@@ -1684,7 +1684,9 @@ class SeedTranscribeSeedQRZoomedInView(View):
         self.seedqr_format = seedqr_format
         self.seed = self.controller.get_seed(seed_num)
         self.initial_zone_x = initial_zone_x
-        self.initial_zone_y = initial_zone_y 
+        self.initial_zone_y = initial_zone_y
+        # Don't let the screensaver interrupt hand-transcription of the SeedQR.
+        self.allow_screensaver = False
 
 
     def run(self):

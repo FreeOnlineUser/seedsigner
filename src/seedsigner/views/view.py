@@ -72,6 +72,10 @@ class View:
 
         self._redirect: 'Destination' = None
 
+        # A View may opt out of the screensaver (e.g. SeedQR transcription, where the
+        # user reads the screen without touching it for long stretches).
+        self.allow_screensaver = True
+
 
     def __init__(self):
         self._initialize()

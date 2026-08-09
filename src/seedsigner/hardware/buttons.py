@@ -90,7 +90,10 @@ class HardwareButtons(Singleton):
                 return HardwareButtonsConstants.OVERRIDE
 
             cur_time = int(time.time() * 1000)
-            if cur_time - self.last_input_time > controller.screensaver_activation_ms and not controller.is_screensaver_running:
+            # Respect a View opting out of the screensaver (e.g. SeedQR transcription).
+            active_view_allows_screensaver = getattr(controller.active_view, "allow_screensaver", True)
+            if (cur_time - self.last_input_time > controller.screensaver_activation_ms
+                    and not controller.is_screensaver_running and active_view_allows_screensaver):
                 # Start the screensaver. Will block execution until input detected.
                 controller.start_screensaver()
 
