@@ -159,15 +159,30 @@ class ToolsImageEntropyFinalImageScreen(BaseScreen):
             )
             self.renderer.show_image()
 
-        # Touch bar: back = reshoot, check = accept (replaces the stale camera
-        # bar inherited from the live preview)
+        # Touch: make the "< reshoot | accept >" prompt literal - tapping the
+        # LEFT half of the image reshoots, the RIGHT half accepts (no dead
+        # zones). Bar: back = reshoot, check = accept (replaces the default
+        # nav bar, whose up/check/down reads as nonsense on this screen).
         self._set_touch_bar('TOUCH_BAR_BACK_AND_OK')
+        if hasattr(self.hw_inputs, 'register_buttons'):
+            from types import SimpleNamespace
+            self.hw_inputs.register_buttons([
+                SimpleNamespace(screen_x=0, screen_y=0, width=120, height=240),    # left half: reshoot
+                SimpleNamespace(screen_x=120, screen_y=0, width=120, height=240),  # right half: accept
+            ])
 
-        # LEFT / bar-back / corner-back = reshoot; RIGHT / image tap / bar-check = accept
         input = self.hw_inputs.wait_for([HardwareButtonsConstants.KEY_LEFT, HardwareButtonsConstants.KEY_RIGHT] + HardwareButtonsConstants.KEYS__ANYCLICK)
+
+        tapped_half = -1
+        if hasattr(self.hw_inputs, 'get_tapped_button_index'):
+            tapped_half = self.hw_inputs.get_tapped_button_index()
+        if hasattr(self.hw_inputs, 'clear_buttons'):
+            self.hw_inputs.clear_buttons()
         corner_back = hasattr(self.hw_inputs, 'was_back_button_tapped') and self.hw_inputs.was_back_button_tapped()
+
         if (input == HardwareButtonsConstants.KEY_LEFT
                 or corner_back
+                or tapped_half == 0
                 or (input == HardwareButtonsConstants.KEY1 and os.environ.get('SEEDSIGNER_TOUCH') == '1')):
             return RET_CODE__BACK_BUTTON
 
