@@ -1525,11 +1525,12 @@ class SeedAddPassphraseScreen(BaseTopNavScreen):
     def _render(self):
         super()._render()
 
-        # Hide touch bar - this screen has its own side panel buttons
+        # Touch bar carries DEL / OK (side panel keeps case/symbols/confirm for
+        # non-touch); del + ok land in the same spot as the word keyboards.
         disp = self.renderer.disp
         if hasattr(disp, 'set_touch_bar_labels'):
             from seedsigner.hardware.DPI28 import DPI28
-            disp.set_touch_bar_labels(DPI28.TOUCH_BAR_HIDDEN)
+            disp.set_touch_bar_labels(DPI28.TOUCH_BAR_KEYBOARD_PASSPHRASE)
 
         # Change from the default lowercase keyboard for the screenshot generator
         if self.initial_keyboard == self.KEYBOARD__UPPERCASE_BUTTON_TEXT:
@@ -1586,10 +1587,11 @@ class SeedAddPassphraseScreen(BaseTopNavScreen):
                 if hasattr(touch_buttons, 'was_back_button_tapped') and touch_buttons.was_back_button_tapped():
                     return dict(passphrase=self.passphrase, is_back_button=True)
 
-                # Check for touch bar taps
-                if hasattr(touch_buttons, 'was_touch_bar_back_tapped') and touch_buttons.was_touch_bar_back_tapped():
-                    # Touch bar left = KEY1 = switch abc/ABC keyboard
-                    input = HardwareButtonsConstants.KEY1
+                # Drain the touch-bar-back flag so it can't leak to the next screen;
+                # bar taps are handled below by coordinate (native coords are -1 for
+                # them), not by this KEY1-only flag.
+                if hasattr(touch_buttons, 'was_touch_bar_back_tapped'):
+                    touch_buttons.was_touch_bar_back_tapped()
 
                 # Check for direct key tap on keyboard
                 # Note: taps on edges may return KEY_LEFT/KEY_RIGHT from _coords_to_nav_key,
@@ -1659,6 +1661,31 @@ class SeedAddPassphraseScreen(BaseTopNavScreen):
                         else:
                             # Didn't tap anything valid
                             continue
+
+                # Bottom touch bar: DEL / OK / (blank). Bar taps carry no native UI
+                # coords (x < 0), which is what distinguishes them from the side-panel
+                # buttons above (those set input from a valid UI-area tap).
+                elif input in (HardwareButtonsConstants.KEY1, HardwareButtonsConstants.KEY2, HardwareButtonsConstants.KEY3):
+                    if input == HardwareButtonsConstants.KEY1:
+                        # DEL (delete at cursor)
+                        if cursor_position > 0:
+                            if cursor_position == len(self.passphrase):
+                                self.passphrase = self.passphrase[:-1]
+                            else:
+                                self.passphrase = self.passphrase[:cursor_position - 1] + self.passphrase[cursor_position:]
+                            cursor_position -= 1
+                            self.text_entry_display.render(self.passphrase, cursor_position)
+                            self.renderer.show_image()
+                        continue
+                    elif input == HardwareButtonsConstants.KEY2:
+                        # OK (confirm); reuse the side checkmark's press feedback
+                        self.hw_button3.is_selected = True
+                        self.hw_button3.render()
+                        self.renderer.show_image()
+                        return dict(passphrase=self.passphrase)
+                    else:
+                        # Blank third: no-op
+                        continue
 
             with self.renderer.lock:
                 # Check our two possible exit conditions

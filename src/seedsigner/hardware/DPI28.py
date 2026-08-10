@@ -107,6 +107,9 @@ class DPI28(BaseDisplayDriver):
     TOUCH_BAR_KEYBOARD_DEL_ACTIVE = ((_DEL, _WORD, _DOWN), ('#ff9416', '#444444', '#ff9416'), ('seedsigner', 'seedsigner', 'seedsigner'))
     TOUCH_BAR_KEYBOARD_BOTH_ACTIVE = ((_DEL, _WORD, _DOWN), ('#ff9416', '#ff9416', '#ff9416'), ('seedsigner', 'seedsigner', 'seedsigner'))
     TOUCH_BAR_KEYBOARD_BOTH_ACTIVE_DOWN_DISABLED = ((_DEL, _WORD, _DOWN), ('#ff9416', '#ff9416', '#444444'), ('seedsigner', 'seedsigner', 'seedsigner'))
+    # Passphrase/PIN keyboard: DEL / OK / (blank). Mirrors the word keyboard's
+    # del + ok placement; no scroll slot since there's no matches list.
+    TOUCH_BAR_KEYBOARD_PASSPHRASE = ((_DEL, _SELECT, ''), ('#ff9416', '#ff9416', '#1a1a1a'), ('seedsigner', 'seedsigner', 'seedsigner'))
     TOUCH_BAR_HIDDEN = (('', '', ''), ('#1a1a1a', '#1a1a1a', '#1a1a1a'), ('seedsigner', 'seedsigner', 'seedsigner'))
     TOUCH_BAR_BACK = ((_BACK, '', ''), ('#ff9416', '#1a1a1a', '#1a1a1a'), ('seedsigner', 'seedsigner', 'seedsigner'))
     TOUCH_BAR_CAMERA = ((_BACK, TouchBarIcons.CAMERA, ''), ('#ff9416', '#ff9416', '#1a1a1a'), ('seedsigner', 'fontawesome', 'seedsigner'))
