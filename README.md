@@ -14,7 +14,19 @@ word keyboard, and BIP-85 child seed workflows.
 - Raspberry Pi Zero
 - Waveshare 2.8" DPI capacitive touchscreen (480×640, Goodix GT911 touch)
 - Pi Camera module
-- (optional) USB CCID smartcard reader + OTG adapter, for the smartcard features
+
+### Smartcard reader (optional, for the smartcard features)
+
+Cards are accessed over PC/SC, and this build ships the USB CCID stack
+(pcsc-lite + libccid). Use a **USB PC/SC (CCID) reader on the OTG port**; that
+is the only supported and tested interface.
+
+GPIO/UART readers (PN532, SEC1210) are **not** supported on this build: the
+hardware UART (GPIO 14/15) and related pins collide with the DPI display, and
+no driver for them ships in the image. Those options in Settings are inherited
+from upstream and inert here.
+
+Supported cards: Satochip, Seedkeeper, and Keycard.
 
 Display + touch bring-up for this panel is documented in
 [`DISPLAY_SETUP.md`](DISPLAY_SETUP.md), with boot config, dtoverlays and setup
