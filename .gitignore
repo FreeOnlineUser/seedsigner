@@ -15,3 +15,4 @@ src/seedsigner/models/settings_definition.json
 .venv/
 src/seedsigner/resources/seedsigner-translations/
 seedsigner-screenshots/*/
+tools/image_build/out/
