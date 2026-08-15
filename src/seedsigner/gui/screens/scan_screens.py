@@ -1,3 +1,4 @@
+import os
 import time
 
 from dataclasses import dataclass
@@ -54,6 +55,9 @@ class ScanScreen(BaseScreen):
         from seedsigner.hardware.camera import Camera
         # Initialize the base class
         super().__post_init__()
+
+        # Set touch bar for camera mode (back button on left)
+        self._set_touch_bar('TOUCH_BAR_BACK')
 
         # TODO: Arrange this with UI elements rather than text
         self.instructions_text = "< " + _("back") + "  |  " + _(self.instructions_text)
@@ -260,7 +264,12 @@ class ScanScreen(BaseScreen):
                         # We received a valid frame, but we've already seen in
                         self.frames_decode_status.set_value(self.FRAME__REPEATED_PART)
                 
-                if self.hw_inputs.check_for_low(HardwareButtonsConstants.KEY_RIGHT) or self.hw_inputs.check_for_low(HardwareButtonsConstants.KEY_LEFT):
+                exit_pressed = self.hw_inputs.check_for_low(HardwareButtonsConstants.KEY_RIGHT) or self.hw_inputs.check_for_low(HardwareButtonsConstants.KEY_LEFT) or self.hw_inputs.check_for_low(HardwareButtonsConstants.KEY1)
+                if not exit_pressed and os.environ.get('SEEDSIGNER_TOUCH') == '1':
+                    # Touch: a tap anywhere still cancels the scan (check_for_low is
+                    # key-aware now, so the plain-tap case must be requested explicitly)
+                    exit_pressed = self.hw_inputs.check_for_low(keys=HardwareButtonsConstants.KEYS__ANYCLICK)
+                if exit_pressed:
                     self.camera.stop_video_stream_mode()
                     return False
 

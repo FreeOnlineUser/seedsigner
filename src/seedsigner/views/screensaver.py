@@ -33,6 +33,22 @@ class LogoScreen(BaseScreen):
             self.partner_logos[partner] = load_image(logo_url)
 
 
+    def _set_touch_bar_hidden(self):
+        """Hide all touch bar buttons, saving current state for restore"""
+        if os.environ.get('SEEDSIGNER_TOUCH') == '1':
+            disp = self.renderer.disp
+            self._saved_touch_bar_labels = getattr(disp, '_current_labels', None)
+        self._set_touch_bar('TOUCH_BAR_HIDDEN')
+
+    def _restore_touch_bar(self):
+        """Restore touch bar to its state before it was hidden"""
+        if os.environ.get('SEEDSIGNER_TOUCH') == '1':
+            saved = getattr(self, '_saved_touch_bar_labels', None)
+            if saved is not None:
+                disp = self.renderer.disp
+                if hasattr(disp, 'set_touch_bar_labels'):
+                    disp.set_touch_bar_labels(saved)
+
     def _run(self):
         pass
 
@@ -59,11 +75,13 @@ class OpeningSplashScreen(LogoScreen):
         self.force_partner_logos = force_partner_logos
         super().__init__()
 
-
     def _render(self):
         from PIL import Image
         from seedsigner.controller import Controller
         controller = Controller.get_instance()
+
+        # Hide touch bar during splash screen
+        self._set_touch_bar_hidden()
 
         # TODO: Fix for the screenshot generator. When generating screenshots for
         # multiple locales, there is a button still in the canvas from the previous
@@ -109,6 +127,21 @@ class OpeningSplashScreen(LogoScreen):
         if len(version) > version_max_chars:
             # Squeeze a second version display line in if needed
             self.renderer.draw.text(xy=(version_x, version_y + GUIConstants.get_top_nav_title_font_size()), text=version[version_max_chars:], font=font, fill=GUIConstants.ACCENT_COLOR, anchor="mt")
+
+        # This fork's touchscreen port has not been through upstream review.
+        # Warn on every boot; DO NOT remove until the port is reviewed.
+        warning_font = Fonts.get_font(GUIConstants.get_body_font_name(), GUIConstants.get_body_font_size())
+        for line_num, line in enumerate(["UNREVIEWED TOUCH FORK", "TESTNET ONLY"]):
+            self.renderer.draw.text(
+                xy=(int(self.renderer.canvas_width/2),
+                    GUIConstants.EDGE_PADDING + line_num * (GUIConstants.get_body_font_size() + 4)),
+                text=line,
+                font=warning_font,
+                fill=GUIConstants.DIRE_WARNING_COLOR,
+                stroke_width=2,
+                stroke_fill=GUIConstants.BACKGROUND_COLOR,
+                anchor="mt",
+            )
 
         if not self.renderer.is_screenshot_generator:
             self.renderer.show_image()
@@ -194,6 +227,9 @@ class ScreensaverScreen(LogoScreen):
 
         self._is_running = True
 
+        # Hide touch bar during screensaver
+        self._set_touch_bar_hidden()
+
         # Store the current screen in order to restore it later
         self.last_screen = self.renderer.canvas.copy()
 
@@ -249,7 +285,8 @@ class ScreensaverScreen(LogoScreen):
             finally:
                 self._is_running = False
 
-                # Restore the original screen
+                # Restore touch bar before showing screen so it renders correctly
+                self._restore_touch_bar()
                 self.renderer.show_image(self.last_screen)
 
 

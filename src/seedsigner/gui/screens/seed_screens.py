@@ -1,5 +1,6 @@
 import logging
 import math
+import os
 import time
 
 from dataclasses import dataclass
@@ -11,7 +12,7 @@ from seedsigner.hardware.buttons import HardwareButtons, HardwareButtonsConstant
 from seedsigner.helpers.qr import QR
 from seedsigner.gui.components import (Button, FontAwesomeIconConstants, Fonts, FormattedAddress, IconButton,
     IconTextLine, SeedSignerIconConstants, TextArea, GUIConstants, reflow_text_into_pages)
-from seedsigner.gui.keyboard import Keyboard, TextEntryDisplay
+from seedsigner.gui.keyboard import Keyboard, T9Pad, TextEntryDisplay
 from seedsigner.gui.renderer import Renderer
 from seedsigner.models.threads import BaseThread, ThreadsafeCounter
 
@@ -48,6 +49,14 @@ class SeedMnemonicEntryScreen(BaseTopNavScreen):
         self.arrow_up_is_active = False
         self.arrow_down_is_active = False
 
+        # Check if touchscreen mode
+        import os
+        self.is_touch_mode = os.environ.get('SEEDSIGNER_TOUCH') == '1'
+
+        # For touchscreen mode, start with empty input (no pre-selected 'a')
+        if self.is_touch_mode and self.initial_letters == ["a"]:
+            self.initial_letters = [" "]  # Start empty
+
         # TODO: support other BIP-39 languages/charsets
         self.keyboard = Keyboard(
             draw=self.image_draw,
@@ -76,7 +85,7 @@ class SeedMnemonicEntryScreen(BaseTopNavScreen):
             cur_text="".join(self.initial_letters)
         )
 
-        self.letters = self.initial_letters
+        self.letters = self.initial_letters[:]  # Copy to avoid mutating original
 
         # Initialize the current matches
         self.possible_words = []
@@ -85,8 +94,10 @@ class SeedMnemonicEntryScreen(BaseTopNavScreen):
             self.calc_possible_alphabet()
             self.keyboard.update_active_keys(active_keys=self.possible_alphabet)
             self.keyboard.set_selected_key(selected_letter=self.letters[-2])
-        else:
+        elif self.letters[-1] != " ":
+            # Only set selected key if it's a valid letter (not space for touch mode)
             self.keyboard.set_selected_key(selected_letter=self.letters[-1])
+        # For touch mode with empty start, no key is pre-selected
 
         self.matches_list_x = self.canvas_width - matches_list_button_width
         self.matches_list_y = self.top_nav.height
@@ -163,13 +174,13 @@ class SeedMnemonicEntryScreen(BaseTopNavScreen):
         # BUT render the currently highlighted match as a normal Button element
 
         if not self.possible_words:
-            # Clear the right panel
+            # Clear the right panel (entire word list area)
             self.renderer.draw.rectangle(
                 (
                     self.matches_list_x,
                     self.top_nav.height,
                     self.canvas_width,
-                    self.matches_list_y
+                    self.canvas_height
                 ),
                 fill=GUIConstants.BACKGROUND_COLOR
             )
@@ -248,17 +259,129 @@ class SeedMnemonicEntryScreen(BaseTopNavScreen):
         self.text_entry_display.render()
         self.render_possible_matches()
 
+        # Set touch bar to keyboard mode
+        self._update_touch_bar()
+
         self.renderer.show_image()
 
 
+    def _update_touch_bar(self):
+        """Update touch bar based on whether there's content to delete, words to select, and scroll position"""
+        disp = self.renderer.disp
+        if hasattr(disp, 'set_touch_bar_labels'):
+            from seedsigner.hardware.DPI28 import DPI28
+            # DEL is active (orange) if there's content to delete (not just empty space)
+            has_content = len(self.letters) > 1 or (len(self.letters) == 1 and self.letters[0] != " ")
+            # WORD is active (orange) if there are possible words to select
+            has_words = hasattr(self, 'possible_words') and self.possible_words
+            # Down arrow is active (orange) if we can scroll down (not at bottom of word list)
+            can_scroll_down = has_words and hasattr(self, 'selected_possible_words_index') and self.selected_possible_words_index < len(self.possible_words) - 1
+
+            if has_words and has_content:
+                if can_scroll_down:
+                    disp.set_touch_bar_labels(DPI28.TOUCH_BAR_KEYBOARD_BOTH_ACTIVE)
+                else:
+                    disp.set_touch_bar_labels(DPI28.TOUCH_BAR_KEYBOARD_BOTH_ACTIVE_DOWN_DISABLED)
+            elif has_words:
+                if can_scroll_down:
+                    disp.set_touch_bar_labels(DPI28.TOUCH_BAR_KEYBOARD_WORD_ACTIVE)
+                else:
+                    # At bottom with words but no content - WORD active, down grey
+                    disp.set_touch_bar_labels(DPI28.TOUCH_BAR_KEYBOARD_BOTH_ACTIVE_DOWN_DISABLED)
+            elif has_content:
+                disp.set_touch_bar_labels(DPI28.TOUCH_BAR_KEYBOARD_DEL_ACTIVE)
+            else:
+                disp.set_touch_bar_labels(DPI28.TOUCH_BAR_KEYBOARD_DOWN_DISABLED)
+
+
+    def _reset_touch_bar(self):
+        """Reset touch bar to default labels when leaving keyboard screen"""
+        disp = self.renderer.disp
+        if hasattr(disp, 'set_touch_bar_labels'):
+            from seedsigner.hardware.DPI28 import DPI28
+            disp.set_touch_bar_labels(DPI28.TOUCH_BAR_DEFAULT)
+
+
     def _run(self):
+        # Clear any stale input from previous screen
+        if hasattr(self.hw_inputs, 'clear_pending_input'):
+            self.hw_inputs.clear_pending_input()
+
+        first_input = True
         while True:
-            input = self.hw_inputs.wait_for(HardwareButtonsConstants.ALL_KEYS)
+            input = self.hw_inputs.wait_for(HardwareButtonsConstants.ALL_KEYS, check_release=False)
+
+            # Check for direct back button tap (touchscreen - top left corner of screen)
+            if hasattr(self.hw_inputs, 'was_back_button_tapped'):
+                if self.hw_inputs.was_back_button_tapped():
+                    self._reset_touch_bar()
+                    return RET_CODE__BACK_BUTTON
+
+            # Check for touch bar DEL button tap (left side of touch bar = KEY1)
+            if hasattr(self.hw_inputs, 'was_touch_bar_back_tapped'):
+                if self.hw_inputs.was_touch_bar_back_tapped():
+                    # Left touch bar button is now DEL, not BACK
+                    input = HardwareButtonsConstants.KEY1
+
+            # Check for direct taps (touchscreen)
+            up_arrow_tapped = False
+            down_arrow_tapped = False
+            if hasattr(self.hw_inputs, 'get_last_tap_native_coords'):
+                tap_x, tap_y = self.hw_inputs.get_last_tap_native_coords()
+                if tap_x >= 0 and tap_y >= 0:
+                    # Check for up arrow button tap (scroll up word list)
+                    up_btn = self.matches_list_up_button
+                    if (up_btn.screen_x <= tap_x <= up_btn.screen_x + up_btn.width and
+                        up_btn.screen_y <= tap_y <= up_btn.screen_y + up_btn.height):
+                        up_arrow_tapped = True
+                    # Check for down arrow button tap (scroll down, not KEY3 which is now DEL)
+                    elif (self.matches_list_down_button.screen_x <= tap_x <= self.matches_list_down_button.screen_x + self.matches_list_down_button.width and
+                          self.matches_list_down_button.screen_y <= tap_y <= self.matches_list_down_button.screen_y + self.matches_list_down_button.height):
+                        down_arrow_tapped = True
+                    # Check for highlighted word tap (SELECT)
+                    elif (self.matches_list_highlight_button.screen_x <= tap_x <= self.matches_list_highlight_button.screen_x + self.matches_list_highlight_button.width and
+                          self.matches_list_highlight_button.screen_y <= tap_y <= self.matches_list_highlight_button.screen_y + self.matches_list_highlight_button.height):
+                        input = HardwareButtonsConstants.KEY2
+                    else:
+                        # Check for keyboard tap
+                        tapped_key = self.keyboard.get_key_at_screen_coords(tap_x, tap_y)
+                        if tapped_key is not None and tapped_key.is_active:
+                            # Select the tapped key and simulate KEY_PRESS
+                            self.keyboard.set_selected_key_indices(tapped_key.index_x, tapped_key.index_y)
+                            self.keyboard.render_keys()
+                            input = HardwareButtonsConstants.KEY_PRESS
+
+            # Handle up arrow tap separately (scroll word list up)
+            if up_arrow_tapped and self.possible_words:
+                self.selected_possible_words_index -= 1
+                if self.selected_possible_words_index < 0:
+                    self.selected_possible_words_index = 0
+                if not self.arrow_up_is_active:
+                    self.arrow_up_is_active = True
+                    self.matches_list_up_button.is_selected = True
+                self.render_possible_matches()
+                self._update_touch_bar()  # Update down arrow state based on position
+                self.renderer.show_image()
+                continue
+
+            # Handle down arrow tap separately (scroll word list down)
+            if down_arrow_tapped and self.possible_words:
+                self.selected_possible_words_index += 1
+                if self.selected_possible_words_index >= len(self.possible_words):
+                    self.selected_possible_words_index = len(self.possible_words) - 1
+                if not self.arrow_down_is_active:
+                    self.arrow_down_is_active = True
+                    self.matches_list_down_button.is_selected = True
+                self.render_possible_matches()
+                self._update_touch_bar()  # Update down arrow state based on position
+                self.renderer.show_image()
+                continue
 
             with self.renderer.lock:
                 if self.is_input_in_top_nav:
                     if input == HardwareButtonsConstants.KEY_PRESS:
                         # User clicked the "back" arrow
+                        self._reset_touch_bar()
                         return RET_CODE__BACK_BUTTON
 
                     elif input == HardwareButtonsConstants.KEY_UP:
@@ -307,53 +430,40 @@ class SeedMnemonicEntryScreen(BaseTopNavScreen):
 
                 # Has the user made a final selection of a candidate word?
                 final_selection = None
-                if input == HardwareButtonsConstants.KEY1 and self.possible_words:
-                    # Scroll the list up
-                    self.selected_possible_words_index -= 1
-                    if self.selected_possible_words_index < 0:
-                        self.selected_possible_words_index = 0
+                if input == HardwareButtonsConstants.KEY1:
+                    # KEY1 = DEL - delete the last letter
+                    if len(self.letters) > 2:
+                        self.letters = self.letters[:-2]
+                        self.letters.append(" ")
+                    elif len(self.letters) == 2:
+                        self.letters = [" "]
+                    elif len(self.letters) == 1 and self.letters[0] != " ":
+                        self.letters = [" "]
 
-                    if not self.arrow_up_is_active:
-                        # Flash the up arrow as selected
-                        self.arrow_up_is_active = True
-                        self.matches_list_up_button.is_selected = True
+                    if len(self.letters) >= 1:
+                        self.calc_possible_alphabet()
+                        self.keyboard.update_active_keys(active_keys=self.possible_alphabet)
+                        self.keyboard.render_keys()
+                        self.render_possible_matches()
+                        self._update_touch_bar()
 
                 elif input == HardwareButtonsConstants.KEY2:
                     if self.possible_words:
                         final_selection = self.possible_words[self.selected_possible_words_index]
 
                 elif input == HardwareButtonsConstants.KEY3 and self.possible_words:
-                    # Scroll the list down
+                    # KEY3 = scroll down the word list
                     self.selected_possible_words_index += 1
                     if self.selected_possible_words_index >= len(self.possible_words):
                         self.selected_possible_words_index = len(self.possible_words) - 1
 
                     if not self.arrow_down_is_active:
-                        # Flash the down arrow as selected
                         self.arrow_down_is_active = True
                         self.matches_list_down_button.is_selected = True
 
-                if input is not HardwareButtonsConstants.KEY1 and self.arrow_up_is_active:
-                    # Deactivate the UP arrow and redraw
-                    self.arrow_up_is_active = False
-                    self.matches_list_up_button.is_selected = False
+                    self._update_touch_bar()  # Update down arrow state based on position
 
-                if input is not HardwareButtonsConstants.KEY3 and self.arrow_down_is_active:
-                    # Deactivate the DOWN arrow and redraw
-                    self.arrow_down_is_active = False
-                    self.matches_list_down_button.is_selected = False
-
-                if final_selection:
-                    # Animate the selection storage, then return the word to the caller
-                    self.letters = list(final_selection + " ")
-                    self.render_possible_matches(highlight_word=final_selection)
-                    self.text_entry_display.cur_text = ''.join(self.letters)
-                    self.text_entry_display.render()
-                    self.renderer.show_image()
-
-                    return final_selection
-
-                elif input == HardwareButtonsConstants.KEY_PRESS and ret_val in self.possible_alphabet:
+                if input == HardwareButtonsConstants.KEY_PRESS and ret_val in self.possible_alphabet:
                     # User has locked in the current letter
                     if self.letters[-1] != " ":
                         # We'll save that locked in letter next but for now update the
@@ -385,6 +495,9 @@ class SeedMnemonicEntryScreen(BaseTopNavScreen):
 
                     self.keyboard.render_keys()
 
+                    # Update touch bar DEL button color (now active since we have content)
+                    self._update_touch_bar()
+
                 elif input in HardwareButtonsConstants.KEYS__LEFT_RIGHT_UP_DOWN \
                         or input in (Keyboard.ENTER_TOP, Keyboard.ENTER_BOTTOM):
                     if ret_val in self.possible_alphabet:
@@ -397,10 +510,25 @@ class SeedMnemonicEntryScreen(BaseTopNavScreen):
                         self.letters = self.letters[:-1]
                         self.letters.append(ret_val)
                         self.calc_possible_words()  # live update our matches as we move
-                    
+
                     else:
                         # We've navigated to a deactivated letter
                         pass
+
+                if input is not HardwareButtonsConstants.KEY1 and self.arrow_up_is_active:
+                    # Deactivate the UP arrow and redraw
+                    self.arrow_up_is_active = False
+                    self.matches_list_up_button.is_selected = False
+
+                if self.arrow_down_is_active:
+                    # Deactivate the DOWN arrow and redraw
+                    self.arrow_down_is_active = False
+                    self.matches_list_down_button.is_selected = False
+
+                if final_selection:
+                    # Animate the selection storage, then return the word to the caller
+                    self.letters = list(final_selection + " ")
+                    self.render_possible_matches(highlight_word=final_selection)
 
                 # Render the text entry display and cursor block
                 self.text_entry_display.cur_text = ''.join(self.letters)
@@ -409,9 +537,552 @@ class SeedMnemonicEntryScreen(BaseTopNavScreen):
                 # Update the right-hand possible matches area
                 self.render_possible_matches()
 
+                # Update touch bar based on current state
+                self._update_touch_bar()
+
                 # Now issue one call to send the pixels to the screen
                 self.renderer.show_image()
 
+                if final_selection:
+                    self._reset_touch_bar()
+                    return final_selection
+
+
+@dataclass
+class SeedMnemonicEntryT9Screen(BaseTopNavScreen):
+    """
+    T9 keyboard for seed word entry (touchscreen-optimized).
+
+    Two modes:
+    * multi-tap (default): tap a key repeatedly to cycle its letters.
+    * predictive (`predictive=True`): one tap per key; candidates matching the
+      tapped key-group sequence rank in the side list and the entry line shows
+      the highlighted candidate's prefix. No cycling, no timeout.
+    """
+    initial_letters: list = None
+    wordlist: list = None
+    predictive: bool = False
+
+    # T9 cycling timeout in milliseconds
+    CYCLING_TIMEOUT_MS = 1000
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        self.possible_alphabet = "abcdefghijklmnopqrstuvwxyz"
+
+        # Measure word list button width (same as standard keyboard screen)
+        matches_list_highlight_font_name = GUIConstants.FIXED_WIDTH_EMPHASIS_FONT_NAME
+        matches_list_highlight_font_size = GUIConstants.get_button_font_size() + 4
+        (left, top, right, bottom) = Fonts.get_font(matches_list_highlight_font_name, matches_list_highlight_font_size).getbbox("mushroom", anchor="ls")
+        matches_list_max_text_width = right - left
+        matches_list_button_width = matches_list_max_text_width + 2 * GUIConstants.COMPONENT_PADDING
+
+        # Layout
+        text_entry_display_y = self.top_nav.height
+        text_entry_display_height = 30
+        t9_pad_width = self.canvas_width - GUIConstants.EDGE_PADDING - matches_list_button_width
+
+        # T9 pad
+        t9_top = text_entry_display_y + text_entry_display_height + 6
+        self.t9_pad = T9Pad(
+            draw=self.image_draw,
+            rect=(
+                GUIConstants.EDGE_PADDING,
+                t9_top,
+                GUIConstants.EDGE_PADDING + t9_pad_width,
+                self.canvas_height,
+            ),
+            highlight_color=GUIConstants.ACCENT_COLOR,
+        )
+
+        # Text entry display
+        self.text_entry_display = TextEntryDisplay(
+            canvas=self.canvas,
+            rect=(
+                GUIConstants.EDGE_PADDING,
+                text_entry_display_y,
+                GUIConstants.EDGE_PADDING + t9_pad_width,
+                text_entry_display_y + text_entry_display_height,
+            ),
+            is_centered=False,
+            cur_text="".join(self.initial_letters) if self.initial_letters else " ",
+        )
+
+        # Letters state (committed letters + trailing space for cursor)
+        self.letters = list(self.initial_letters[:]) if self.initial_letters else [" "]
+
+        # Word list (right side) - reuse same components as standard screen
+        self.possible_words = []
+        self.selected_possible_words_index = 0
+        self.arrow_up_is_active = False
+        self.arrow_down_is_active = False
+
+        # Predictive mode: the T9 keys tapped for the current word (the real state;
+        # self.letters just mirrors the highlighted candidate's prefix for display)
+        self.key_seq: list = []
+
+        # Pre-calc word list if we have initial letters
+        if self.predictive:
+            initial_word = "".join(self.letters).strip()
+            if initial_word:
+                self.key_seq = T9Pad.word_to_key_seq(initial_word)
+                self._recalc_predictive()
+                if initial_word in self.possible_words:
+                    # Editing an existing word: highlight it, not the top guess
+                    self.selected_possible_words_index = self.possible_words.index(initial_word)
+                    self._sync_predictive_display()
+        elif len(self.letters) > 1 or (len(self.letters) == 1 and self.letters[0] != " "):
+            self.calc_possible_alphabet()
+            self._update_pad_active_letters()
+
+        self.matches_list_x = self.canvas_width - matches_list_button_width
+        self.matches_list_y = self.top_nav.height
+        self.highlighted_row_y = int((self.canvas_height - GUIConstants.BUTTON_HEIGHT) / 2)
+
+        self.matches_list_highlight_button = Button(
+            text="abcdefghijklmnopqrstuvwxyz",
+            is_text_centered=False,
+            font_name=GUIConstants.FIXED_WIDTH_EMPHASIS_FONT_NAME,
+            font_size=GUIConstants.get_button_font_size() + 4,
+            screen_x=self.matches_list_x,
+            screen_y=self.highlighted_row_y,
+            width=self.canvas_width - self.matches_list_x + GUIConstants.COMPONENT_PADDING,
+            height=int(0.75 * GUIConstants.BUTTON_HEIGHT),
+            is_scrollable_text=False,
+        )
+
+        arrow_button_width = GUIConstants.BUTTON_HEIGHT + GUIConstants.EDGE_PADDING
+        arrow_button_height = int(0.75 * GUIConstants.BUTTON_HEIGHT)
+        self.matches_list_up_button = IconButton(
+            icon_name=FontAwesomeIconConstants.ANGLE_UP,
+            icon_size=GUIConstants.ICON_INLINE_FONT_SIZE + 2,
+            is_text_centered=False,
+            screen_x=self.canvas_width - arrow_button_width + GUIConstants.COMPONENT_PADDING,
+            screen_y=self.highlighted_row_y - 3 * GUIConstants.COMPONENT_PADDING - GUIConstants.BUTTON_HEIGHT,
+            width=arrow_button_width,
+            height=arrow_button_height,
+        )
+
+        self.matches_list_down_button = IconButton(
+            icon_name=FontAwesomeIconConstants.ANGLE_DOWN,
+            icon_size=GUIConstants.ICON_INLINE_FONT_SIZE + 2,
+            is_text_centered=False,
+            screen_x=self.canvas_width - arrow_button_width + GUIConstants.COMPONENT_PADDING,
+            screen_y=self.highlighted_row_y + GUIConstants.BUTTON_HEIGHT + 3 * GUIConstants.COMPONENT_PADDING,
+            width=arrow_button_width,
+            height=arrow_button_height,
+        )
+
+        self.word_font = Fonts.get_font(GUIConstants.FIXED_WIDTH_EMPHASIS_FONT_NAME, GUIConstants.get_button_font_size() + 4)
+        (left, top, right, bottom) = self.word_font.getbbox("abcdefghijklmnopqrstuvwxyz", anchor="ls")
+        self.word_font_height = -1 * top
+        self.matches_list_row_height = self.word_font_height + GUIConstants.COMPONENT_PADDING
+
+    def calc_possible_alphabet(self, new_letter=False):
+        """Calculate which letters are still valid given current input."""
+        if (self.letters and len(self.letters) > 1 and not new_letter) or (len(self.letters) > 0 and new_letter):
+            search_letters = self.letters[:]
+            if not new_letter:
+                search_letters.pop()
+            self.calc_possible_words()
+            letter_num = len(search_letters)
+            possible_letters = []
+            for word in self.possible_words:
+                if len(word) - 1 >= letter_num:
+                    possible_letters.append(word[letter_num])
+            self.possible_alphabet = list(dict.fromkeys(possible_letters))[:]
+        else:
+            self.possible_alphabet = "abcdefghijklmnopqrstuvwxyz"
+            self.possible_words = []
+
+    def calc_possible_words(self):
+        self.possible_words = [w for w in self.wordlist if w.startswith("".join(self.letters).strip())]
+        self.selected_possible_words_index = 0
+
+    def render_possible_matches(self, highlight_word=None):
+        """Render word list on the right side (identical to standard screen)."""
+        if not self.possible_words:
+            self.renderer.draw.rectangle(
+                (self.matches_list_x, self.top_nav.height, self.canvas_width, self.canvas_height),
+                fill=GUIConstants.BACKGROUND_COLOR,
+            )
+            return
+
+        img = Image.new(
+            "RGB",
+            (self.canvas_width - self.matches_list_x, self.canvas_height),
+            GUIConstants.BACKGROUND_COLOR,
+        )
+        draw = ImageDraw.Draw(img)
+
+        word_indent = GUIConstants.COMPONENT_PADDING
+        highlighted_row = 3
+        num_possible_rows = 11
+
+        if not highlight_word:
+            list_starting_index = self.selected_possible_words_index - highlighted_row
+            for row, i in enumerate(range(list_starting_index, list_starting_index + num_possible_rows)):
+                if i < 0 or row == highlighted_row:
+                    continue
+                if len(self.possible_words) <= i:
+                    break
+                if row < highlighted_row:
+                    cur_y = self.highlighted_row_y - GUIConstants.COMPONENT_PADDING - (highlighted_row - row - 1) * self.matches_list_row_height
+                elif row > highlighted_row:
+                    cur_y = self.highlighted_row_y + self.matches_list_highlight_button.height + (row - highlighted_row) * self.matches_list_row_height
+                draw.text((word_indent, cur_y), self.possible_words[i], fill="#ddd", font=self.word_font, anchor="ls")
+
+        self.canvas.paste(
+            img.crop((0, self.top_nav.height, img.width, img.height)),
+            (self.matches_list_x, self.matches_list_y),
+        )
+
+        self.matches_list_highlight_button.text = self.possible_words[self.selected_possible_words_index]
+        self.matches_list_highlight_button.is_selected = True
+        self.matches_list_highlight_button.render()
+        self.matches_list_up_button.render()
+        self.matches_list_down_button.render()
+
+    def _render(self):
+        super()._render()
+        self.t9_pad.render_keys()
+        self.text_entry_display.render()
+        self.render_possible_matches()
+        self._update_touch_bar()
+        self.renderer.show_image()
+
+    def _update_touch_bar(self):
+        """Update touch bar based on current state."""
+        disp = self.renderer.disp
+        if hasattr(disp, 'set_touch_bar_labels'):
+            from seedsigner.hardware.DPI28 import DPI28
+            has_content = len(self.letters) > 1 or (len(self.letters) == 1 and self.letters[0] != " ")
+            has_words = bool(self.possible_words)
+            can_scroll_down = has_words and self.selected_possible_words_index < len(self.possible_words) - 1
+
+            if has_words and has_content:
+                if can_scroll_down:
+                    disp.set_touch_bar_labels(DPI28.TOUCH_BAR_KEYBOARD_BOTH_ACTIVE)
+                else:
+                    disp.set_touch_bar_labels(DPI28.TOUCH_BAR_KEYBOARD_BOTH_ACTIVE_DOWN_DISABLED)
+            elif has_words:
+                if can_scroll_down:
+                    disp.set_touch_bar_labels(DPI28.TOUCH_BAR_KEYBOARD_WORD_ACTIVE)
+                else:
+                    disp.set_touch_bar_labels(DPI28.TOUCH_BAR_KEYBOARD_BOTH_ACTIVE_DOWN_DISABLED)
+            elif has_content:
+                disp.set_touch_bar_labels(DPI28.TOUCH_BAR_KEYBOARD_DEL_ACTIVE)
+            else:
+                disp.set_touch_bar_labels(DPI28.TOUCH_BAR_KEYBOARD_DOWN_DISABLED)
+
+    def _reset_touch_bar(self):
+        disp = self.renderer.disp
+        if hasattr(disp, 'set_touch_bar_labels'):
+            from seedsigner.hardware.DPI28 import DPI28
+            disp.set_touch_bar_labels(DPI28.TOUCH_BAR_DEFAULT)
+
+    def _update_pad_active_letters(self):
+        """
+        Update which letters the pad offers.
+
+        When the prefix narrows to a single word there is nothing left to
+        type: deactivate every letter so the dark pad itself signals that
+        selecting the word is the only move left.
+        """
+        if len(self.possible_words) == 1:
+            self.t9_pad.update_active_letters("")
+        else:
+            self.t9_pad.update_active_letters(self.possible_alphabet)
+
+    def _commit_letter(self, letter: str):
+        """Commit a letter: add to letters, recalc alphabet, update pad."""
+        if self.letters[-1] == " ":
+            self.letters[-1] = letter
+        else:
+            self.letters.append(letter)
+        self.letters.append(" ")
+        self.calc_possible_alphabet()
+        self._update_pad_active_letters()
+
+    def _delete_last(self):
+        """Delete the last committed letter."""
+        if len(self.letters) > 2:
+            self.letters = self.letters[:-2]
+            self.letters.append(" ")
+        elif len(self.letters) == 2:
+            self.letters = [" "]
+        elif len(self.letters) == 1 and self.letters[0] != " ":
+            self.letters = [" "]
+        self.calc_possible_alphabet()
+        self._update_pad_active_letters()
+
+    # --- Predictive ("best guess") mode ---
+
+    def _recalc_predictive(self):
+        """Recompute candidates, pad dimming, and display from the tapped keys."""
+        if not self.key_seq:
+            self.possible_words = []
+            self.selected_possible_words_index = 0
+            self.possible_alphabet = "abcdefghijklmnopqrstuvwxyz"
+        else:
+            self.possible_words = T9Pad.filter_words_by_key_seq(self.wordlist, self.key_seq)
+            self.selected_possible_words_index = 0
+            self.possible_alphabet = T9Pad.next_letters(self.possible_words, len(self.key_seq))
+        self._update_pad_active_letters()
+        self._sync_predictive_display()
+
+    def _sync_predictive_display(self):
+        """Mirror the highlighted candidate's prefix into the entry line."""
+        if self.possible_words:
+            prefix = self.possible_words[self.selected_possible_words_index][:len(self.key_seq)]
+            self.letters = list(prefix) + [" "]
+        else:
+            self.letters = [" "]
+        self.text_entry_display.cur_text = "".join(self.letters)
+
+    def _append_key(self, key_num: int):
+        self.key_seq.append(key_num)
+        self._recalc_predictive()
+
+    def _delete_last_key(self):
+        if self.key_seq:
+            self.key_seq.pop()
+        self._recalc_predictive()
+
+    def _run(self):
+        if hasattr(self.hw_inputs, 'clear_pending_input'):
+            self.hw_inputs.clear_pending_input()
+
+        cycling = False  # Whether we're in cycling mode
+
+        while True:
+            # Use timeout when cycling to auto-commit
+            timeout = self.CYCLING_TIMEOUT_MS if cycling else 0
+            input_key = self.hw_inputs.wait_for(HardwareButtonsConstants.ALL_KEYS, check_release=False, timeout_ms=timeout)
+
+            # Timeout - commit the cycling letter
+            if input_key is None and cycling:
+                committed = self.t9_pad.commit_cycling()
+                if committed:
+                    self._commit_letter(committed)
+                else:
+                    self.calc_possible_alphabet()
+                cycling = False
+                with self.renderer.lock:
+                    self.t9_pad.render_keys()
+                    self.text_entry_display.cur_text = "".join(self.letters)
+                    self.text_entry_display.render()
+                    self.render_possible_matches()
+                    self._update_touch_bar()
+                    self.renderer.show_image()
+                continue
+
+            # Check for back button tap
+            if hasattr(self.hw_inputs, 'was_back_button_tapped'):
+                if self.hw_inputs.was_back_button_tapped():
+                    if cycling:
+                        self.t9_pad.cancel_cycling()
+                    self._reset_touch_bar()
+                    return RET_CODE__BACK_BUTTON
+
+            # Check for touch bar back
+            if hasattr(self.hw_inputs, 'was_touch_bar_back_tapped'):
+                if self.hw_inputs.was_touch_bar_back_tapped():
+                    input_key = HardwareButtonsConstants.KEY1  # DEL
+
+            # Check for direct taps
+            tapped_t9_key = None
+            tapped_word = False
+            up_arrow_tapped = False
+            down_arrow_tapped = False
+
+            if hasattr(self.hw_inputs, 'get_last_tap_native_coords'):
+                tap_x, tap_y = self.hw_inputs.get_last_tap_native_coords()
+                if tap_x >= 0 and tap_y >= 0:
+                    # Check T9 pad
+                    t9_hit = self.t9_pad.get_key_at_screen_coords(tap_x, tap_y)
+                    if t9_hit is not None:
+                        tapped_t9_key = t9_hit
+                    # Check word list highlight button
+                    elif (self.matches_list_highlight_button.screen_x <= tap_x <= self.matches_list_highlight_button.screen_x + self.matches_list_highlight_button.width and
+                          self.matches_list_highlight_button.screen_y <= tap_y <= self.matches_list_highlight_button.screen_y + self.matches_list_highlight_button.height):
+                        tapped_word = True
+                    # Check up arrow
+                    elif (self.matches_list_up_button.screen_x <= tap_x <= self.matches_list_up_button.screen_x + self.matches_list_up_button.width and
+                          self.matches_list_up_button.screen_y <= tap_y <= self.matches_list_up_button.screen_y + self.matches_list_up_button.height):
+                        up_arrow_tapped = True
+                    # Check down arrow
+                    elif (self.matches_list_down_button.screen_x <= tap_x <= self.matches_list_down_button.screen_x + self.matches_list_down_button.width and
+                          self.matches_list_down_button.screen_y <= tap_y <= self.matches_list_down_button.screen_y + self.matches_list_down_button.height):
+                        down_arrow_tapped = True
+
+            # Handle top nav back button (d-pad)
+            if self.is_input_in_top_nav:
+                if input_key == HardwareButtonsConstants.KEY_PRESS:
+                    if cycling:
+                        self.t9_pad.cancel_cycling()
+                    self._reset_touch_bar()
+                    return RET_CODE__BACK_BUTTON
+                elif input_key in [HardwareButtonsConstants.KEY_UP, HardwareButtonsConstants.KEY_DOWN]:
+                    self.is_input_in_top_nav = False
+                    self.top_nav.left_button.is_selected = False
+                    self.top_nav.left_button.render()
+                    self.renderer.show_image()
+                    continue
+                elif input_key in [HardwareButtonsConstants.KEY_LEFT, HardwareButtonsConstants.KEY_RIGHT]:
+                    continue
+
+            # --- Process T9 key tap ---
+            if tapped_t9_key is not None:
+                with self.renderer.lock:
+                    if tapped_t9_key == "DEL":
+                        if self.predictive:
+                            self._delete_last_key()
+                        elif cycling:
+                            self.t9_pad.cancel_cycling()
+                            cycling = False
+                        else:
+                            self._delete_last()
+                        self.t9_pad.render_keys()
+                        self.text_entry_display.cur_text = "".join(self.letters)
+                        self.text_entry_display.render()
+                        self.render_possible_matches()
+                        self._update_touch_bar()
+                        self.renderer.show_image()
+                        continue
+
+                    # Number key tapped
+                    if self.predictive:
+                        # Best-guess mode: one tap per key, the candidate list
+                        # disambiguates. No cycling, no timeout.
+                        self._append_key(tapped_t9_key)
+                        self.t9_pad.render_keys()
+                        self.text_entry_display.render()
+                        self.render_possible_matches()
+                        self._update_touch_bar()
+                        self.renderer.show_image()
+                        continue
+
+                    if cycling and self.t9_pad.cycling_key != tapped_t9_key:
+                        # Different key - commit current cycling letter first
+                        committed = self.t9_pad.commit_cycling()
+                        if committed:
+                            self._commit_letter(committed)
+                        else:
+                            self.calc_possible_alphabet()
+                        cycling = False
+
+                    valid_letters = self.t9_pad.get_valid_letters(tapped_t9_key)
+                    if not cycling and len(valid_letters) == 1:
+                        # Only one letter on this key can continue a valid word:
+                        # commit it immediately, no cycle wait
+                        self._commit_letter(valid_letters[0])
+                        self.text_entry_display.cur_text = "".join(self.letters)
+                    else:
+                        # Start or continue cycling on this key
+                        letter = self.t9_pad.start_cycling(tapped_t9_key)
+                        if letter:
+                            cycling = True
+                            # Show preview: committed letters + cycling letter + cursor
+                            preview = self.letters[:-1]  # Remove trailing space
+                            preview_text = "".join(preview) + letter + " "
+                            self.text_entry_display.cur_text = preview_text
+
+                            # Preview word matches with the cycling letter
+                            preview_letters = preview + [letter, " "]
+                            old_letters = self.letters
+                            self.letters = preview_letters
+                            self.calc_possible_words()
+                            self.letters = old_letters
+
+                    self.t9_pad.render_keys()
+                    self.text_entry_display.render()
+                    self.render_possible_matches()
+                    self._update_touch_bar()
+                    self.renderer.show_image()
+                continue
+
+            # --- Handle word selection ---
+            if tapped_word or input_key == HardwareButtonsConstants.KEY2:
+                if cycling:
+                    committed = self.t9_pad.commit_cycling()
+                    if committed:
+                        self._commit_letter(committed)
+                    else:
+                        self.calc_possible_alphabet()
+                    cycling = False
+                if self.possible_words:
+                    final_selection = self.possible_words[self.selected_possible_words_index]
+                    self.letters = list(final_selection + " ")
+                    with self.renderer.lock:
+                        self.t9_pad.render_keys()
+                        self.text_entry_display.cur_text = "".join(self.letters)
+                        self.text_entry_display.render()
+                        self.render_possible_matches(highlight_word=final_selection)
+                        self.renderer.show_image()
+                    self._reset_touch_bar()
+                    return final_selection
+                continue
+
+            # --- Handle scroll up ---
+            if up_arrow_tapped and self.possible_words:
+                self.selected_possible_words_index = max(0, self.selected_possible_words_index - 1)
+                with self.renderer.lock:
+                    if self.predictive:
+                        # Same keys, different letters: re-mirror the highlighted prefix
+                        self._sync_predictive_display()
+                        self.text_entry_display.render()
+                    self.render_possible_matches()
+                    self._update_touch_bar()
+                    self.renderer.show_image()
+                continue
+
+            # --- Handle scroll down ---
+            if down_arrow_tapped or input_key == HardwareButtonsConstants.KEY3:
+                if self.possible_words:
+                    self.selected_possible_words_index = min(len(self.possible_words) - 1, self.selected_possible_words_index + 1)
+                    with self.renderer.lock:
+                        if self.predictive:
+                            self._sync_predictive_display()
+                            self.text_entry_display.render()
+                        self.render_possible_matches()
+                        self._update_touch_bar()
+                        self.renderer.show_image()
+                continue
+
+            # --- Handle DEL (KEY1 / touch bar) ---
+            if input_key == HardwareButtonsConstants.KEY1:
+                if self.predictive:
+                    self._delete_last_key()
+                elif cycling:
+                    self.t9_pad.cancel_cycling()
+                    cycling = False
+                else:
+                    self._delete_last()
+                with self.renderer.lock:
+                    self.t9_pad.render_keys()
+                    self.text_entry_display.cur_text = "".join(self.letters)
+                    self.text_entry_display.render()
+                    self.render_possible_matches()
+                    self._update_touch_bar()
+                    self.renderer.show_image()
+                continue
+
+            # --- Handle d-pad UP (exit to top nav) ---
+            if input_key == HardwareButtonsConstants.KEY_UP:
+                if cycling:
+                    committed = self.t9_pad.commit_cycling()
+                    if committed:
+                        self._commit_letter(committed)
+                    else:
+                        self.calc_possible_alphabet()
+                    cycling = False
+                self.is_input_in_top_nav = True
+                self.top_nav.left_button.is_selected = True
+                self.top_nav.left_button.render()
+                self.renderer.show_image()
+                continue
 
 
 @dataclass
@@ -449,6 +1120,17 @@ class SeedOptionsScreen(ButtonListScreen):
         self.title = self.fingerprint
         self.is_button_text_centered = False
         self.is_bottom_list = True
+
+        # The icon'd top nav title can't scroll, and clipped index digits would
+        # read as a DIFFERENT valid child index. Long indices arrive already
+        # middle-elided (c21..47), but a multi-parent label can still overflow;
+        # if it can't fit, cap to the bare fingerprint (the full label remains
+        # visible in the seeds list).
+        title_font = Fonts.get_font(GUIConstants.get_top_nav_title_font_name(), GUIConstants.get_top_nav_title_font_size())
+        (left, top, right, bottom) = title_font.getbbox(self.title)
+        icon_width = GUIConstants.ICON_FONT_SIZE + 4 + GUIConstants.COMPONENT_PADDING
+        if (right - left) + icon_width > Renderer.get_instance().canvas_width - 4:
+            self.title = self.fingerprint.split(" ")[0]
 
         super().__post_init__()
 
@@ -551,6 +1233,8 @@ class SeedBIP85SelectChildIndexScreen(KeyboardScreen):
         self.custom_additional_keys = [Keyboard.KEY_BACKSPACE_5]
 
         super().__post_init__()
+
+        self._set_touch_bar('TOUCH_BAR_BACK_AND_OK')
 
 
 
@@ -841,6 +1525,12 @@ class SeedAddPassphraseScreen(BaseTopNavScreen):
     def _render(self):
         super()._render()
 
+        # Hide touch bar - this screen has its own side panel buttons
+        disp = self.renderer.disp
+        if hasattr(disp, 'set_touch_bar_labels'):
+            from seedsigner.hardware.DPI28 import DPI28
+            disp.set_touch_bar_labels(DPI28.TOUCH_BAR_HIDDEN)
+
         # Change from the default lowercase keyboard for the screenshot generator
         if self.initial_keyboard == self.KEYBOARD__UPPERCASE_BUTTON_TEXT:
             cur_keyboard = self.keyboard_ABC
@@ -876,11 +1566,99 @@ class SeedAddPassphraseScreen(BaseTopNavScreen):
         cur_button1_text = self.KEYBOARD__UPPERCASE_BUTTON_TEXT
         cur_button2_text = self.KEYBOARD__DIGITS_BUTTON_TEXT
 
+        # Check for touch support
+        touch_buttons = None
+        if hasattr(self.hw_inputs, 'get_last_tap_native_coords'):
+            touch_buttons = self.hw_inputs
+            # Clear any pending input
+            if hasattr(touch_buttons, 'clear_pending_input'):
+                touch_buttons.clear_pending_input()
+
         # Start the interactive update loop
         while True:
-            input = self.hw_inputs.wait_for(HardwareButtonsConstants.ALL_KEYS)
+            input = self.hw_inputs.wait_for(HardwareButtonsConstants.ALL_KEYS, check_release=False)
 
             keyboard_swap = False
+
+            # Handle touch-specific input
+            if touch_buttons:
+                # Check for back button tap (top-left corner)
+                if hasattr(touch_buttons, 'was_back_button_tapped') and touch_buttons.was_back_button_tapped():
+                    return dict(passphrase=self.passphrase, is_back_button=True)
+
+                # Check for touch bar taps
+                if hasattr(touch_buttons, 'was_touch_bar_back_tapped') and touch_buttons.was_touch_bar_back_tapped():
+                    # Touch bar left = KEY1 = switch abc/ABC keyboard
+                    input = HardwareButtonsConstants.KEY1
+
+                # Check for direct key tap on keyboard
+                # Note: taps on edges may return KEY_LEFT/KEY_RIGHT from _coords_to_nav_key,
+                # so we check tap coordinates regardless of what input was returned
+                x, y = touch_buttons.get_last_tap_native_coords()
+                if x >= 0 and y >= 0:
+                    key = cur_keyboard.get_key_at_screen_coords(x, y)
+                    if key:
+                        # Update keyboard selection to tapped key
+                        cur_keyboard.set_selected_key_indices(key.index_x, key.index_y)
+                        cur_keyboard.render_keys()
+                        # Process the key
+                        if key.code == Keyboard.KEY_BACKSPACE["code"]:
+                            if cursor_position > 0:
+                                if cursor_position == len(self.passphrase):
+                                    self.passphrase = self.passphrase[:-1]
+                                else:
+                                    self.passphrase = self.passphrase[:cursor_position - 1] + self.passphrase[cursor_position:]
+                                cursor_position -= 1
+                                self.text_entry_display.render(self.passphrase, cursor_position)
+                            self.renderer.show_image()
+                            continue
+                        elif key.code == Keyboard.KEY_CURSOR_LEFT["code"]:
+                            cursor_position = max(0, cursor_position - 1)
+                            self.text_entry_display.render(self.passphrase, cursor_position)
+                            self.renderer.show_image()
+                            continue
+                        elif key.code == Keyboard.KEY_CURSOR_RIGHT["code"]:
+                            cursor_position = min(len(self.passphrase), cursor_position + 1)
+                            self.text_entry_display.render(self.passphrase, cursor_position)
+                            self.renderer.show_image()
+                            continue
+                        elif key.code == Keyboard.KEY_SPACE["code"]:
+                            if cursor_position == len(self.passphrase):
+                                self.passphrase += " "
+                            else:
+                                self.passphrase = self.passphrase[:cursor_position] + " " + self.passphrase[cursor_position:]
+                            cursor_position += 1
+                            self.text_entry_display.render(self.passphrase, cursor_position)
+                            self.renderer.show_image()
+                            continue
+                        else:
+                            # Regular character
+                            if cursor_position == len(self.passphrase):
+                                self.passphrase += key.letter
+                            else:
+                                self.passphrase = self.passphrase[:cursor_position] + key.letter + self.passphrase[cursor_position:]
+                            cursor_position += 1
+                            self.text_entry_display.render(self.passphrase, cursor_position)
+                            self.renderer.show_image()
+                            continue
+                    else:
+                        # Tap was not on a key - check if it hit the right panel buttons
+                        # Coords are in native 240x240 space
+                        # hw_button1: ABC/abc toggle
+                        if (self.hw_button1.screen_x <= x <= self.hw_button1.screen_x + self.hw_button1.width and
+                            self.hw_button1.screen_y <= y <= self.hw_button1.screen_y + self.hw_button1.height):
+                            input = HardwareButtonsConstants.KEY1
+                        # hw_button2: 123/!@#/*[] toggle
+                        elif (self.hw_button2.screen_x <= x <= self.hw_button2.screen_x + self.hw_button2.width and
+                              self.hw_button2.screen_y <= y <= self.hw_button2.screen_y + self.hw_button2.height):
+                            input = HardwareButtonsConstants.KEY2
+                        # hw_button3: Confirm (checkmark)
+                        elif (self.hw_button3.screen_x <= x <= self.hw_button3.screen_x + self.hw_button3.width and
+                              self.hw_button3.screen_y <= y <= self.hw_button3.screen_y + self.hw_button3.height):
+                            input = HardwareButtonsConstants.KEY3
+                        else:
+                            # Didn't tap anything valid
+                            continue
 
             with self.renderer.lock:
                 # Check our two possible exit conditions
@@ -1246,7 +2024,11 @@ class SeedTranscribeSeedQRZoomedInScreen(BaseScreen):
             width=1
         )
 
-        msg = _("click to exit")
+        if os.environ.get('SEEDSIGNER_TOUCH') == '1':
+            # Touch: taps pan toward the tap; exit is the touch bar / back corner.
+            msg = _("tap to move, bar to exit")
+        else:
+            msg = _("click to exit")
         font = Fonts.get_font(GUIConstants.get_body_font_name(), GUIConstants.get_body_font_size())
         (left, top, right, bottom) = font.getbbox(msg, anchor="ls")
         msg_height = -1 * top + GUIConstants.COMPONENT_PADDING
@@ -1328,8 +2110,18 @@ class SeedTranscribeSeedQRZoomedInScreen(BaseScreen):
 
 
     def _run(self):
+        # On the touchscreen, map taps to a pan direction relative to the centred
+        # cell (TouchButtons._coords_to_nav_key_center_relative) so a stray tap pans
+        # instead of exiting. Exit stays on the touch bar / top-left back corner.
+        nav_kwargs = {}
+        if os.environ.get('SEEDSIGNER_TOUCH') == '1':
+            nav_kwargs['nav_relative_center'] = True
+
         while True:
-            input = self.hw_inputs.wait_for(HardwareButtonsConstants.KEYS__LEFT_RIGHT_UP_DOWN + HardwareButtonsConstants.KEYS__ANYCLICK)
+            input = self.hw_inputs.wait_for(
+                HardwareButtonsConstants.KEYS__LEFT_RIGHT_UP_DOWN + HardwareButtonsConstants.KEYS__ANYCLICK,
+                **nav_kwargs,
+            )
 
             if input in HardwareButtonsConstants.KEYS__ANYCLICK:
                 # User clicked to exit
