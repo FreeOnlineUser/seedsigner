@@ -505,6 +505,14 @@ def generate_screenshots(locale):
         with screenshot_renderer.lock:
             screenshot_renderer.set_screenshot_filename(f"{screenshot_config.screenshot_name}.png")
 
+            # DPI28 mode: reset the touch bar so a preset left over from the previous
+            # screenshot's screen can't leak into this one (on-device the bar simply
+            # persists until the next screen changes it; screenshots must be
+            # self-contained).
+            if getattr(screenshot_renderer, "dpi28_disp", None) is not None:
+                screenshot_renderer.dpi28_disp.set_touch_bar_labels(
+                    screenshot_renderer.dpi28_disp.TOUCH_BAR_DEFAULT)
+
         controller = Controller.get_instance()
         toast_thread = screenshot_config.toast_thread
         try:
