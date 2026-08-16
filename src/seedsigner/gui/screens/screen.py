@@ -102,6 +102,33 @@ class BaseScreen(BaseComponent):
                 disp.set_touch_bar_labels(preset)
 
 
+    # Touch: centre this screen's body content in the space under the title
+    # bar. Opt-in, because some screens place things deliberately. Screens
+    # that simply stack text from a fixed top pad end up with all the extra
+    # height of the taller canvas pooled underneath them.
+    touch_center_body = False
+
+    def _centre_body_components(self):
+        if not (is_touch_ui() and self.touch_center_body):
+            return
+        if getattr(self, "_body_centred", False):
+            return
+        self._body_centred = True
+
+        top_nav = getattr(self, "top_nav", None)
+        comps = [c for c in self.components if c is not top_nav]
+        if not comps:
+            return
+        body_top = top_nav.height if top_nav else 0
+        top = min(c.screen_y for c in comps)
+        bottom = max(c.screen_y + getattr(c, "height", 0) for c in comps)
+        free = (self.canvas_height - bottom) + (top - body_top)
+        shift = int(free / 2) - (top - body_top)
+        if shift <= 0:
+            return
+        for c in comps:
+            c.screen_y += shift
+
     def get_threads(self) -> List[BaseThread]:
         threads = self.threads.copy()
         for component in self.components:
@@ -144,6 +171,7 @@ class BaseScreen(BaseComponent):
 
 
     def _render(self):
+        self._centre_body_components()
         self.clear_screen()
 
         # TODO: Check self.scroll_y and only render visible elements
@@ -382,6 +410,12 @@ class ButtonListScreen(BaseTopNavScreen):
     TOUCH_BUTTON_HEIGHT = 44
     TOUCH_BUTTON_RADIUS = 11
 
+    # Touch: render this list as full-height stacked tiles that fill the
+    # screen, instead of small rows. For short menus (2-3 options) with no
+    # body text, tiles use the space properly and give much larger targets.
+    # Ignored on GPIO builds.
+    touch_fill_tiles: bool = False
+
 
     def __post_init__(self):
         if not self.button_font_name:
@@ -396,12 +430,28 @@ class ButtonListScreen(BaseTopNavScreen):
         # the rest by tiling the hit rects across the inter-row gaps below,
         # giving an effective 48px / 8.5mm target.
         button_height = self.TOUCH_BUTTON_HEIGHT if _is_touch_mode() else GUIConstants.BUTTON_HEIGHT
+        item_padding = GUIConstants.LIST_ITEM_PADDING
+        as_tiles = _is_touch_mode() and self.touch_fill_tiles and 2 <= len(self.button_data) <= 3
+        if as_tiles:
+            # Split the body area into equal full-width tiles.
+            #
+            # Labels are always centred in a tile: left alignment is a list-row
+            # convention (it keeps a column of text scannable), and a caller
+            # asking for it should not leave a tile's label hugging the edge.
+            self.is_button_text_centered = True
+            item_padding = GUIConstants.COMPONENT_PADDING
+            count = len(self.button_data)
+            available = self.canvas_height - self.top_nav.height - 2 * GUIConstants.EDGE_PADDING
+            button_height = int((available - item_padding * (count - 1)) / count)
+
         if len(self.button_data) == 1:
             button_list_height = button_height
         else:
-            button_list_height = (len(self.button_data) * button_height) + (GUIConstants.LIST_ITEM_PADDING * (len(self.button_data) - 1))
+            button_list_height = (len(self.button_data) * button_height) + (item_padding * (len(self.button_data) - 1))
 
-        if self.is_bottom_list:
+        if as_tiles:
+            button_list_y = self.top_nav.height + GUIConstants.EDGE_PADDING
+        elif self.is_bottom_list:
             button_list_y = self.canvas_height - (button_list_height + GUIConstants.EDGE_PADDING)
         else:
             button_list_y = self.top_nav.height + int((self.canvas_height - self.top_nav.height - button_list_height) / 2)
@@ -413,13 +463,13 @@ class ButtonListScreen(BaseTopNavScreen):
             self.has_scroll_arrows = True
 
             # How many buttons fit on the screen before we need to start scrolling?
-            num_buttons_pre_scroll = math.floor((self.canvas_height - button_list_y - GUIConstants.EDGE_PADDING) / (button_height + GUIConstants.LIST_ITEM_PADDING))
+            num_buttons_pre_scroll = math.floor((self.canvas_height - button_list_y - GUIConstants.EDGE_PADDING) / (button_height + item_padding))
 
             # Force a scroll offset when necessary if none was provided
             if self.selected_button + 1 > num_buttons_pre_scroll and not self.scroll_y_initial_offset:
                 # Scroll far enough to expose the selected button; +1 to account for the
                 # height of the target button itself!
-                self.scroll_y_initial_offset = (button_height + GUIConstants.LIST_ITEM_PADDING) * (self.selected_button - num_buttons_pre_scroll + 1)
+                self.scroll_y_initial_offset = (button_height + item_padding) * (self.selected_button - num_buttons_pre_scroll + 1)
 
         self.buttons: List[Button] = []
         for i, button_option in enumerate(self.button_data):
@@ -444,7 +494,7 @@ class ButtonListScreen(BaseTopNavScreen):
                 is_icon_inline=True,
                 right_icon_name=button_option.right_icon_name,
                 screen_x=GUIConstants.EDGE_PADDING,
-                screen_y=button_list_y + i * (button_height + GUIConstants.LIST_ITEM_PADDING),
+                screen_y=button_list_y + i * (button_height + item_padding),
                 scroll_y=self.scroll_y_initial_offset if self.scroll_y_initial_offset is not None else 0,
                 width=self.canvas_width - (2 * GUIConstants.EDGE_PADDING),
                 height=button_height,
@@ -477,8 +527,12 @@ class ButtonListScreen(BaseTopNavScreen):
             arrow_draw.line((self.arrow_half_width, 7, 0, 1), fill=GUIConstants.BUTTON_FONT_COLOR)
             arrow_draw.line((self.arrow_half_width, 7, 2 * self.arrow_half_width, 1), fill=GUIConstants.BUTTON_FONT_COLOR)
 
-        cur_selected_button = self.buttons[self.selected_button]
-        cur_selected_button.is_selected = True
+        # A persistent highlight is a hardware-button idea: it shows where the
+        # d-pad cursor is. On touch there is no cursor, so nothing is
+        # pre-selected; the accent colour appears only while a row is pressed.
+        if not _is_touch_mode():
+            cur_selected_button = self.buttons[self.selected_button]
+            cur_selected_button.is_selected = True
 
         # Reset touch bar to default (▲/SELECT/▼) for list screens
         self._set_touch_bar_default()
@@ -514,7 +568,57 @@ class ButtonListScreen(BaseTopNavScreen):
         return threads
 
 
+    def _recentre_lonely_button_list(self):
+        """
+        Centre a bottom-anchored list when there is nothing above it.
+
+        `is_bottom_list` exists so a list sits below body text. Screens that
+        set it but render no body text (e.g. Backup Seed, two options) end up
+        with the buttons pinned to the bottom and the whole upper screen
+        empty. That was a modest gap on the 240x240 canvas and is a large void
+        on the taller one.
+
+        Runs at render time, not in __post_init__, because subclasses add
+        their body components after ButtonListScreen.__post_init__ returns:
+        this is the first point where "is there anything above the list?" can
+        actually be answered.
+        """
+        if not (_is_touch_mode() and self.is_bottom_list) or self.has_scroll_arrows:
+            return
+        if self.touch_fill_tiles:
+            return
+        if getattr(self, "_recentred", False) or not self.buttons:
+            return
+        self._recentred = True
+
+        # Anything that is neither the title bar nor one of our buttons counts
+        # as body content.
+        others = [c for c in self.components
+                  if c is not self.top_nav and c not in self.buttons]
+        if others:
+            return
+
+        top = self.buttons[0].screen_y
+        bottom = self.buttons[-1].screen_y + self.buttons[-1].height
+        free = (self.canvas_height - bottom) + (top - self.top_nav.height)
+        shift = int(free / 2) - (top - self.top_nav.height)
+        if shift >= 0:
+            return
+        for button in self.buttons:
+            button.screen_y += shift
+            # The label is a separate component whose kwargs captured an
+            # ABSOLUTE screen_y when the button was built, so moving the button
+            # alone would leave its text behind. Move the label with it and
+            # drop any already-built instance so it is recreated in place.
+            for kwargs in (getattr(button, "active_button_label_kwargs", None),
+                           getattr(button, "inactive_button_label_kwargs", None)):
+                if kwargs and "screen_y" in kwargs:
+                    kwargs["screen_y"] += shift
+            button.active_button_label = None
+            button.inactive_button_label = None
+
     def _render(self):
+        self._recentre_lonely_button_list()
         super()._render()
         self._render_visible_buttons()
 
@@ -994,11 +1098,17 @@ class LargeButtonScreen(BaseTopNavScreen):
             if i == 1:
                 button_start_y += button_height + GUIConstants.COMPONENT_PADDING
 
-        self.buttons[self.selected_button].is_selected = True
+        if not _is_touch_mode():
+            # Touch: no d-pad cursor, so no tile starts highlighted.
+            self.buttons[self.selected_button].is_selected = True
 
         # Register buttons for direct touch tap detection
         if hasattr(self.hw_inputs, 'register_buttons'):
             self.hw_inputs.register_buttons(self.buttons)
+
+        # Tiles flash on press, same as list rows.
+        if hasattr(self.hw_inputs, 'register_press_handler'):
+            self.hw_inputs.register_press_handler(self._handle_press_feedback)
 
         # Set touch bar based on screen type. With single-tap tiles the bar has
         # no selection role left, so hide it - but keep an explicit Back
@@ -1011,6 +1121,20 @@ class LargeButtonScreen(BaseTopNavScreen):
                 self._set_touch_bar('TOUCH_BAR_HIDDEN')
         else:
             self._set_touch_bar('TOUCH_BAR_SELECT_ONLY')
+
+    def _handle_press_feedback(self, index):
+        """Paint the tile under the finger as pressed, or clear it."""
+        prev = getattr(self, "_pressed_index", None)
+        if prev == index:
+            return
+        self._pressed_index = index
+        with self.renderer.lock:
+            for i in (prev, index):
+                if i is None or i >= len(self.buttons):
+                    continue
+                self.buttons[i].is_selected = (i == index)
+                self.buttons[i].render()
+            self.renderer.show_image()
 
     def _run(self):
         # Clear any pending touch input from previous screen

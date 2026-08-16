@@ -7,7 +7,7 @@ from PIL.ImageOps import autocontrast
 from typing import List
 
 from seedsigner.helpers.l10n import mark_for_translation as _mft
-from seedsigner.gui.components import Button, CheckboxButton, CheckedSelectionButton, FontAwesomeIconConstants, Fonts, GUIConstants, Icon, IconButton, IconTextLine, SeedSignerIconConstants, TextArea
+from seedsigner.gui.components import is_touch_ui, Button, CheckboxButton, CheckedSelectionButton, FontAwesomeIconConstants, Fonts, GUIConstants, Icon, IconButton, IconTextLine, SeedSignerIconConstants, TextArea
 from seedsigner.gui.screens.scan_screens import ScanScreen
 from seedsigner.gui.screens.screen import BaseScreen, BaseTopNavScreen, ButtonListScreen, ButtonOption
 from seedsigner.hardware.buttons import HardwareButtonsConstants
@@ -294,6 +294,7 @@ class IOTestScreen(BaseTopNavScreen):
 
 @dataclass
 class DonateScreen(BaseTopNavScreen):
+    touch_center_body = True
     def __post_init__(self):
         self.title = _("Donate")
         super().__post_init__()

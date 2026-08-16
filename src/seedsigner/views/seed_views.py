@@ -658,6 +658,7 @@ class SeedBackupView(View):
             title=_("Backup Seed"),
             button_data=button_data,
             is_bottom_list=True,
+            touch_fill_tiles=True,
         )
 
         if selected_menu_num == RET_CODE__BACK_BUTTON:
@@ -839,6 +840,7 @@ class SeedExportXpubQRFormatView(View):
             is_button_text_centered=False,
             button_data=button_data,
             is_bottom_list=True,
+            touch_fill_tiles=True,
         )
 
         if selected_menu_num == RET_CODE__BACK_BUTTON:
