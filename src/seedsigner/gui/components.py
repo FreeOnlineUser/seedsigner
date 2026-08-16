@@ -115,6 +115,11 @@ class GUIConstants:
     COMPONENT_PADDING = 8
     LIST_ITEM_PADDING = 4
 
+    # Gap between a stacked icon and its label (Home tiles). Deliberately
+    # larger than COMPONENT_PADDING: these are big touch targets where the
+    # icon and label must read as two separate elements, not one crowded block.
+    STACKED_ICON_LABEL_PADDING = 16
+
     BACKGROUND_COLOR = "#000000"
     INACTIVE_COLOR = "#414141"
     ACCENT_COLOR = "#FF9F0A" # Active Color
@@ -1597,13 +1602,17 @@ class Button(BaseComponent):
                     # left an 8px gap above the icon and 60px below the label.
                     # It only looked balanced while the tile happened to be
                     # barely taller than icon+label.
-                    group_height = self.icon.height + GUIConstants.COMPONENT_PADDING + self.text_height
+                    # Stacked tiles get a wider icon-to-label gap than the
+                    # generic component padding: at ~286 DPI the 8px default is
+                    # only ~1.4mm, which crowds a 48px icon against its label.
+                    gap = GUIConstants.STACKED_ICON_LABEL_PADDING
+                    group_height = self.icon.height + gap + self.text_height
                     self.icon_y = max(0, int((self.height - group_height) / 2))
                     # NOTE: the label is drawn by a ScrollableTextLine that is
                     # positioned from text_y_OFFSET (not text_y), so both must
                     # be set here - and this must run before the label kwargs
                     # are built further down.
-                    self.text_y_offset = self.icon_y + self.icon.height + GUIConstants.COMPONENT_PADDING
+                    self.text_y_offset = self.icon_y + self.icon.height + gap
                     self.text_y = self.text_y_offset + self.text_height
 
         if self.right_icon_name:
