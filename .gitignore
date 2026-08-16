@@ -42,3 +42,6 @@ tools/image_build/os/README.md
 /setup_dpi28.sh
 /overlays_dpi28/
 tools/image_build/
+
+# Local screenshot layout auditor (dev aid)
+tools/audit_screens.py
