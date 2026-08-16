@@ -33,6 +33,45 @@ from functools import lru_cache
 SHAPE_SUPERSAMPLE = 4
 
 
+FEATHER_ICON_DIR = pathlib.Path(__file__).parent.parent / "resources" / "icons" / "feather"
+
+
+@lru_cache(maxsize=1)
+def _feather_glyph_lookup() -> dict:
+    """
+    Map SeedSigner icon GLYPH -> Feather asset path.
+
+    Screens pass icons around as font glyphs (e.g. "\ue900"), so the lookup is
+    keyed by glyph rather than by constant name. Only icons with a faithful
+    Feather equivalent are present; everything else (bitcoin marks,
+    fingerprint, QR, microSD) keeps the SeedSigner glyph, which is also where
+    the brand is most recognisable.
+    """
+    lookup = {}
+    if not FEATHER_ICON_DIR.is_dir():
+        return lookup
+    for const_name in dir(SeedSignerIconConstants):
+        if const_name.startswith("_") or not const_name.isupper():
+            continue
+        asset = FEATHER_ICON_DIR / f"{const_name}.png"
+        if asset.is_file():
+            lookup[getattr(SeedSignerIconConstants, const_name)] = asset
+    return lookup
+
+
+@lru_cache(maxsize=128)
+def get_feather_icon_mask(asset_path: str, size: int) -> Image.Image:
+    """
+    Alpha mask for a Feather icon at `size` px (cached).
+
+    Assets ship at 128px and are LANCZOS-downscaled here, so one file serves
+    every on-screen size with clean anti-aliased strokes. Cached because the
+    same handful of (icon, size) pairs recur on every render - the Pi Zero
+    must not pay a resample per frame.
+    """
+    return Image.open(asset_path).convert("L").resize((size, size), Image.LANCZOS)
+
+
 @lru_cache(maxsize=64)
 def get_rounded_rect_mask(width: int, height: int, radius: int, outline_width: int = 0) -> Image.Image:
     """
@@ -811,17 +850,39 @@ class Icon(BaseComponent):
     def __post_init__(self):
         super().__post_init__()
 
+        # Feather asset if we have one for this icon; otherwise the original
+        # glyph font. Both paths report the same width/height contract, so
+        # callers and layouts are unaffected either way.
+        self.feather_asset = _feather_glyph_lookup().get(self.icon_name)
+
         if SeedSignerIconConstants.MIN_VALUE <= self.icon_name and self.icon_name <= SeedSignerIconConstants.MAX_VALUE:
             self.icon_font = Fonts.get_font(GUIConstants.ICON_FONT_NAME__SEEDSIGNER, self.icon_size, file_extension="otf")
         else:
             self.icon_font = Fonts.get_font(GUIConstants.ICON_FONT_NAME__FONT_AWESOME, self.icon_size)
-        
+
         # Set width/height based on exact pixels that are rendered
         (left, top, self.width, bottom) = self.icon_font.getbbox(self.icon_name, anchor="ls")
         self.height = -1 * top
 
+        if self.feather_asset is not None:
+            # Feather is drawn on a square 24x24 grid. Match the glyph's
+            # rendered height so surrounding layout maths is unchanged, and
+            # keep the icon square.
+            self.width = self.height
+
 
     def render(self):
+        if self.feather_asset is not None:
+            size = max(1, int(self.height))
+            mask = get_feather_icon_mask(str(self.feather_asset), size)
+            # State comes from colour, never from a different asset.
+            self.canvas.paste(
+                Image.new("RGB", (size, size), self.icon_color),
+                (int(self.screen_x), int(self.screen_y)),
+                mask,
+            )
+            return
+
         self.image_draw.text(
             (self.screen_x, self.screen_y + self.height),
             text=self.icon_name,
