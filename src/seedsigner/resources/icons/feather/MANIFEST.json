@@ -5,6 +5,16 @@
   "raster_size": 128,
   "stroke_width": 2.25,
   "icons": {
+    "SCAN": {
+      "feather": "maximize+grid",
+      "composite": {
+        "base": "maximize",
+        "inner": "grid",
+        "inner_scale": 0.44
+      },
+      "svg_sha256": "d072a129844b3ffd6dd1bdf03ff6c8c241fe1cdcddab0b45a0f5e9ebb9e6aef9",
+      "png_sha256": "c0443f6dc37f62cb03a85cc020c06f2848dbc3b266d90978c24ffa560e613ded"
+    },
     "BACK": {
       "feather": "arrow-left",
       "svg_sha256": "0f365f8529b575e3ba9b073e9010af028291cf5d509c49685ea2c57ac872f6a8",
@@ -139,11 +149,6 @@
       "feather": "refresh-cw",
       "svg_sha256": "fa58747f96ba81cdae6b6c3e9cce141102c4ea994a7c8421243b7ae0bf03d4b4",
       "png_sha256": "ac89a60cd8bd8fec5e187fc9c7db24c465c11455df05bb17e238ebce87d85fb5"
-    },
-    "SCAN": {
-      "feather": "maximize",
-      "svg_sha256": "ba38bdfbe075937776c082b4ef68b7cc0fc62c2fc95fb24e7e9dfaae5dc1c460",
-      "png_sha256": "c5f9106dc876193fffdf225e2f75b9497a3d5d0d850dd164f5d03ae5fa70f6f1"
     },
     "SEEDS": {
       "feather": "key",

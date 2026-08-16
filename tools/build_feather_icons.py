@@ -47,7 +47,6 @@ OUT_DIR = pathlib.Path(__file__).parent.parent / "src/seedsigner/resources/icons
 
 # SeedSigner icon constant -> Feather icon name.
 ICON_MAP = {
-    "SCAN": "maximize",
     "SEEDS": "key",
     "SETTINGS": "settings",
     "TOOLS": "tool",
@@ -77,6 +76,13 @@ ICON_MAP = {
     "QRCODE": "grid",
     "MICROSD": "hard-drive",
     "SPACE": "minus",          # space bar
+}
+
+# Composites: a base icon with a second icon nested inside it. "Scan" needs to
+# read as *scanning a QR code*, not just a viewfinder, which is what the
+# original SeedSigner glyph conveyed - the corner brackets alone lose that.
+COMPOSITE_MAP = {
+    "SCAN": {"base": "maximize", "inner": "grid", "inner_scale": 0.44},
 }
 
 # FontAwesome constant -> Feather icon name. Assets are written with an "FA_"
@@ -121,6 +127,21 @@ def rasterize(svg: bytes) -> Image.Image:
     return rgba.getchannel("A")
 
 
+def rasterize_composite(base_svg: bytes, inner_svg: bytes, inner_scale: float) -> Image.Image:
+    """Nest `inner` centred inside `base`, combining their alpha masks."""
+    base = rasterize(base_svg)
+    inner_px = int(ICON_RASTER_SIZE * inner_scale)
+    inner = rasterize(inner_svg).resize((inner_px, inner_px), Image.LANCZOS)
+    offset = (ICON_RASTER_SIZE - inner_px) // 2
+    combined = base.copy()
+    # Lighter = per-pixel max, so overlapping strokes stay opaque rather than
+    # summing into artefacts.
+    region = combined.crop((offset, offset, offset + inner_px, offset + inner_px))
+    from PIL import ImageChops
+    combined.paste(ImageChops.lighter(region, inner), (offset, offset))
+    return combined
+
+
 def main():
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     manifest = {
@@ -131,6 +152,20 @@ def main():
         "stroke_width": STROKE_WIDTH,
         "icons": {},
     }
+    for const_name, spec in sorted(COMPOSITE_MAP.items()):
+        base_svg = fetch(spec["base"])
+        inner_svg = fetch(spec["inner"])
+        mask = rasterize_composite(base_svg, inner_svg, spec["inner_scale"])
+        out = OUT_DIR / f"{const_name}.png"
+        mask.save(out, optimize=True)
+        manifest["icons"][const_name] = {
+            "feather": f'{spec["base"]}+{spec["inner"]}',
+            "composite": spec,
+            "svg_sha256": hashlib.sha256(base_svg + inner_svg).hexdigest(),
+            "png_sha256": hashlib.sha256(out.read_bytes()).hexdigest(),
+        }
+        print(f"  {const_name:20s} <- feather/{spec['base']} + {spec['inner']}")
+
     targets = [(n, f, n) for n, f in ICON_MAP.items()]
     targets += [(n, f, f"FA_{n}") for n, f in FONTAWESOME_MAP.items()]
     for const_name, feather_name, out_name in sorted(targets, key=lambda t: t[2]):
@@ -152,7 +187,7 @@ def main():
         f"Version {FEATHER_VERSION}\n"
         "Licensed under the MIT License. Copyright (c) 2013-2023 Cole Bemis.\n"
     )
-    print(f"\n{len(targets)} icons -> {OUT_DIR}")
+    print(f"\n{len(targets) + len(COMPOSITE_MAP)} icons -> {OUT_DIR}")
     print("Provenance (source URL, version, per-file sha256) in MANIFEST.json")
 
 
