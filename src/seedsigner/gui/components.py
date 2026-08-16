@@ -50,12 +50,20 @@ def _feather_glyph_lookup() -> dict:
     lookup = {}
     if not FEATHER_ICON_DIR.is_dir():
         return lookup
-    for const_name in dir(SeedSignerIconConstants):
-        if const_name.startswith("_") or not const_name.isupper():
-            continue
-        asset = FEATHER_ICON_DIR / f"{const_name}.png"
-        if asset.is_file():
-            lookup[getattr(SeedSignerIconConstants, const_name)] = asset
+
+    # Both icon namespaces are covered. FontAwesome assets carry an "FA_"
+    # prefix so a shared constant name (e.g. CAMERA) cannot collide.
+    for constants_cls, prefix in ((SeedSignerIconConstants, ""),
+                                  (FontAwesomeIconConstants, "FA_")):
+        for const_name in dir(constants_cls):
+            if const_name.startswith("_") or not const_name.isupper():
+                continue
+            value = getattr(constants_cls, const_name)
+            if not isinstance(value, str):
+                continue
+            asset = FEATHER_ICON_DIR / f"{prefix}{const_name}.png"
+            if asset.is_file():
+                lookup.setdefault(value, asset)
     return lookup
 
 

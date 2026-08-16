@@ -46,11 +46,6 @@ STROKE_WIDTH = 2.25
 OUT_DIR = pathlib.Path(__file__).parent.parent / "src/seedsigner/resources/icons/feather"
 
 # SeedSigner icon constant -> Feather icon name.
-#
-# Deliberately NOT mapped (no faithful Feather equivalent; these keep the
-# SeedSigner glyph, which also preserves the brand where it is most
-# recognisable): BITCOIN, BITCOIN_ALT, FINGERPRINT, QRCODE, MICROSD, SPACE,
-# SEEDSIGNER logo marks.
 ICON_MAP = {
     "SCAN": "maximize",
     "SEEDS": "key",
@@ -76,8 +71,30 @@ ICON_MAP = {
     "PASSPHRASE": "lock",
     "SIGN": "edit-3",
     "DELETE": "delete",
+    # A fingerprint IS a hash of the key, so Feather's hash mark carries the
+    # same meaning without pretending to be a fingerprint drawing.
+    "FINGERPRINT": "hash",
+    "QRCODE": "grid",
+    "MICROSD": "hard-drive",
+    "SPACE": "minus",          # space bar
 }
 
+# FontAwesome constant -> Feather icon name. Assets are written with an "FA_"
+# prefix so the two icon namespaces cannot collide.
+FONTAWESOME_MAP = {
+    "CAMERA": "camera",
+    "KEYBOARD": "type",        # Feather has no keyboard; "type" = text entry
+    "X": "x",
+    "CIRCLE": "circle",
+    "ANGLE_DOWN": "chevron-down",
+    "ANGLE_UP": "chevron-up",
+    "MAP": "map",
+}
+
+# NOT mapped, deliberately - Feather cannot express these without losing
+# meaning, so they keep their original glyph via the runtime fallback:
+#   BITCOIN_ALT  - a currency mark; no generic icon substitutes for it
+#   DICE_ONE..SIX - the pip count IS the information (dice entropy screen)
 
 def fetch(name: str) -> bytes:
     url = f"{BASE_URL}/{name}.svg"
@@ -114,17 +131,19 @@ def main():
         "stroke_width": STROKE_WIDTH,
         "icons": {},
     }
-    for const_name, feather_name in sorted(ICON_MAP.items()):
+    targets = [(n, f, n) for n, f in ICON_MAP.items()]
+    targets += [(n, f, f"FA_{n}") for n, f in FONTAWESOME_MAP.items()]
+    for const_name, feather_name, out_name in sorted(targets, key=lambda t: t[2]):
         svg = fetch(feather_name)
         mask = rasterize(svg)
-        out = OUT_DIR / f"{const_name}.png"
+        out = OUT_DIR / f"{out_name}.png"
         mask.save(out, optimize=True)
-        manifest["icons"][const_name] = {
+        manifest["icons"][out_name] = {
             "feather": feather_name,
             "svg_sha256": hashlib.sha256(svg).hexdigest(),
             "png_sha256": hashlib.sha256(out.read_bytes()).hexdigest(),
         }
-        print(f"  {const_name:20s} <- feather/{feather_name}")
+        print(f"  {out_name:20s} <- feather/{feather_name}")
 
     (OUT_DIR / "MANIFEST.json").write_text(json.dumps(manifest, indent=2) + "\n")
     (OUT_DIR / "LICENSE").write_text(
@@ -133,7 +152,7 @@ def main():
         f"Version {FEATHER_VERSION}\n"
         "Licensed under the MIT License. Copyright (c) 2013-2023 Cole Bemis.\n"
     )
-    print(f"\n{len(ICON_MAP)} icons -> {OUT_DIR}")
+    print(f"\n{len(targets)} icons -> {OUT_DIR}")
     print("Provenance (source URL, version, per-file sha256) in MANIFEST.json")
 
 
