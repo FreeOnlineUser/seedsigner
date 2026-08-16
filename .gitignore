@@ -47,3 +47,4 @@ tools/image_build/
 tools/audit_screens.py
 tools/build_review_page.py
 tools/export_penpot.py
+tools/export_layout.py

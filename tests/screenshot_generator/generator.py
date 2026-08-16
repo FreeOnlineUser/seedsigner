@@ -510,8 +510,13 @@ def generate_screenshots(locale):
             # persists until the next screen changes it; screenshots must be
             # self-contained).
             if getattr(screenshot_renderer, "dpi28_disp", None) is not None:
+                # HIDDEN, matching the driver's default: the control bar is an
+                # overlay that only appears when a screen asks for one. Resetting
+                # to DEFAULT painted a bar onto every screen in the screenshots,
+                # including screens that render full-bleed, where it covered
+                # real content.
                 screenshot_renderer.dpi28_disp.set_touch_bar_labels(
-                    screenshot_renderer.dpi28_disp.TOUCH_BAR_DEFAULT)
+                    screenshot_renderer.dpi28_disp.TOUCH_BAR_HIDDEN)
 
         controller = Controller.get_instance()
         toast_thread = screenshot_config.toast_thread
