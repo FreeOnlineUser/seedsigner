@@ -873,10 +873,16 @@ class Icon(BaseComponent):
         self.height = -1 * top
 
         if self.feather_asset is not None:
-            # Feather is drawn on a square 24x24 grid. Match the glyph's
-            # rendered height so surrounding layout maths is unchanged, and
-            # keep the icon square.
-            self.width = self.height
+            # Feather icons live on a square 24x24 grid; that BOX is the
+            # alignment unit, which is what keeps a set visually consistent.
+            #
+            # Do NOT size them from the replaced glyph's ink bbox: that height
+            # varies per glyph, so every icon came out a different size (the
+            # QR mark rendered visibly larger and heavier than the text-entry
+            # mark next to it). Size the box from the requested icon_size so
+            # every icon occupies an identical square, and let the layout
+            # centre that square.
+            self.width = self.height = self.icon_size
 
 
     def render(self):

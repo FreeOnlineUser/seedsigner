@@ -194,7 +194,16 @@ class ScreensaverScreen(LogoScreen):
         self.image.paste(self.logo, (logo_x, logo_y))
 
         self.min_coords = (0, 0)
-        self.max_coords = (self.renderer.canvas_width, self.renderer.canvas_height)
+        # Travel is the SLACK between the composite image and the crop window,
+        # i.e. the logo's own dimensions - not the canvas size. Those were the
+        # same number only while the canvas was 240x240 like the logo; on the
+        # 240x320 panel canvas the old form let the crop run 80px past the
+        # bottom of the composite, so PIL padded it with black and the logo
+        # drifted off-screen.
+        self.max_coords = (
+            self.image.width - self.renderer.canvas_width,
+            self.image.height - self.renderer.canvas_height,
+        )
 
         # Update our first rendering position so we're centered
         self.cur_x = int(self.logo.width / 2)
