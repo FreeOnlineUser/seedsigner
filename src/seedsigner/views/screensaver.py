@@ -129,19 +129,21 @@ class OpeningSplashScreen(LogoScreen):
             self.renderer.draw.text(xy=(version_x, version_y + GUIConstants.get_top_nav_title_font_size()), text=version[version_max_chars:], font=font, fill=GUIConstants.ACCENT_COLOR, anchor="mt")
 
         # This fork's touchscreen port has not been through upstream review.
-        # Warn on every boot; DO NOT remove until the port is reviewed.
-        warning_font = Fonts.get_font(GUIConstants.get_body_font_name(), GUIConstants.get_body_font_size())
-        for line_num, line in enumerate(["UNREVIEWED TOUCH FORK", "TESTNET ONLY"]):
-            self.renderer.draw.text(
-                xy=(int(self.renderer.canvas_width/2),
-                    GUIConstants.EDGE_PADDING + line_num * (GUIConstants.get_body_font_size() + 4)),
-                text=line,
-                font=warning_font,
-                fill=GUIConstants.DIRE_WARNING_COLOR,
-                stroke_width=2,
-                stroke_fill=GUIConstants.BACKGROUND_COLOR,
-                anchor="mt",
-            )
+        # Warn on every boot; DO NOT remove until the port is reviewed. Touch
+        # build only: a GPIO build of this tree must look exactly like upstream.
+        if os.environ.get('SEEDSIGNER_TOUCH') == '1':
+            warning_font = Fonts.get_font(GUIConstants.get_body_font_name(), GUIConstants.get_body_font_size())
+            for line_num, line in enumerate(["UNREVIEWED TOUCH FORK", "TESTNET ONLY"]):
+                self.renderer.draw.text(
+                    xy=(int(self.renderer.canvas_width/2),
+                        GUIConstants.EDGE_PADDING + line_num * (GUIConstants.get_body_font_size() + 4)),
+                    text=line,
+                    font=warning_font,
+                    fill=GUIConstants.DIRE_WARNING_COLOR,
+                    stroke_width=2,
+                    stroke_fill=GUIConstants.BACKGROUND_COLOR,
+                    anchor="mt",
+                )
 
         if not self.renderer.is_screenshot_generator:
             self.renderer.show_image()

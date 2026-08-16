@@ -9,7 +9,7 @@ from PIL import Image, ImageDraw, ImageColor
 from typing import Any, List, Tuple
 
 from seedsigner.helpers.l10n import mark_for_translation as _mft
-from seedsigner.gui.components import (GUIConstants,
+from seedsigner.gui.components import (GUIConstants, is_touch_ui,
     BaseComponent, Button, Icon, IconButton, LargeIconButton,
     SeedSignerIconConstants, TopNav, TextArea, load_image)
 from seedsigner.gui.keyboard import Keyboard, TextEntryDisplay
@@ -28,7 +28,7 @@ def _is_touch_mode() -> bool:
     touch bar (KEY1/KEY2/KEY3 as up/select/down) MUST be gated on this so that
     physical KEY1/KEY2/KEY3 buttons keep their upstream semantics on GPIO builds.
     """
-    return os.environ.get('SEEDSIGNER_TOUCH') == '1'
+    return is_touch_ui()
 
 
 def _get_input_handler():
@@ -574,7 +574,7 @@ class ButtonListScreen(BaseTopNavScreen):
                 # Render the button after the arrows to cover up overlap
                 button.render()
 
-        if self.has_scroll_arrows:
+        if self.has_scroll_arrows and _is_touch_mode():
             # Buttons are drawn unclipped, so with free-form drag scrolling a
             # partially-scrolled item paints straight over the title bar (the
             # old whole-button-step scrolling could never land there). Repaint
@@ -980,10 +980,10 @@ class LargeButtonScreen(BaseTopNavScreen):
             }
             if icon_name:
                 button_args["icon_name"] = icon_name
-                # NOTE: no text_y_offset. It used to be a ratio of the CANVAS
-                # height (48/240 * canvas_height) applied inside a BUTTON,
-                # which drifted as soon as the two stopped being proportional.
-                # Button now centres the icon+label group in the tile itself.
+                if not _is_touch_mode():
+                    # Upstream layout, untouched. (The touch build instead
+                    # centres the icon+label group inside the tile.)
+                    button_args["text_y_offset"] = int(48 / 240 * self.renderer.canvas_height) + GUIConstants.COMPONENT_PADDING
                 button = LargeIconButton(**button_args)
             else:
                 button = Button(**button_args)

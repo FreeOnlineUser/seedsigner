@@ -56,22 +56,10 @@ def _detect_touch_mode() -> bool:
         logger.info("DPI28 display detected - enabling touch mode")
         return True
 
-    # Auto-detect touch input device via sysfs (no evdev needed)
-    try:
-        for i in range(10):
-            name_path = f"/sys/class/input/event{i}/device/name"
-            try:
-                with open(name_path, "r") as f:
-                    name = f.read().strip()
-                    # Look for common touch device names
-                    if any(keyword in name.lower() for keyword in ["touch", "goodix", "ft5", "edt-ft5"]):
-                        logger.info(f"Auto-detected touch device: {name}")
-                        return True
-            except (IOError, FileNotFoundError):
-                continue
-    except Exception:
-        pass
-
+    # NOTE: deliberately no scan of /sys/class/input names. Matching on
+    # "touch"/"goodix" could flip a stock GPIO SeedSigner into touch mode
+    # because of some unrelated input device. Touch mode follows the display:
+    # this panel is the only touch device this fork supports.
     return False
 
 # Auto-detect touch mode
