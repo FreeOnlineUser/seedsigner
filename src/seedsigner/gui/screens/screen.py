@@ -377,6 +377,11 @@ class ButtonListScreen(BaseTopNavScreen):
     # older select-then-confirm behavior can set this False.
     single_tap_select: bool = True
 
+    # Touch-mode row height and its matching corner radius (radius scales with
+    # height or a taller row reads as a harsher rectangle).
+    TOUCH_BUTTON_HEIGHT = 44
+    TOUCH_BUTTON_RADIUS = 11
+
 
     def __post_init__(self):
         if not self.button_font_name:
@@ -385,7 +390,12 @@ class ButtonListScreen(BaseTopNavScreen):
             self.button_font_size = GUIConstants.get_button_font_size()
         super().__post_init__()
 
-        button_height = GUIConstants.BUTTON_HEIGHT
+        # HIT AREA. The panel is 2.8" at ~286 DPI, so the stock 32px row is
+        # only 5.7mm tall - well under the ~9mm (44pt) touch guideline. Taller
+        # rows cost visible items, so we take 44px (7.8mm) here and recover
+        # the rest by tiling the hit rects across the inter-row gaps below,
+        # giving an effective 48px / 8.5mm target.
+        button_height = self.TOUCH_BUTTON_HEIGHT if _is_touch_mode() else GUIConstants.BUTTON_HEIGHT
         if len(self.button_data) == 1:
             button_list_height = button_height
         else:
@@ -445,6 +455,8 @@ class ButtonListScreen(BaseTopNavScreen):
                 selected_color=self.button_selected_color,
                 is_scrollable_text=True,  # We need to use the ScrollableText class for long button labels
             )
+            if _is_touch_mode():
+                button_kwargs["corner_radius"] = self.TOUCH_BUTTON_RADIUS
             if self.checked_buttons and i in self.checked_buttons:
                 button_kwargs["is_checked"] = True
             button = self.Button_cls(**button_kwargs)
@@ -506,13 +518,22 @@ class ButtonListScreen(BaseTopNavScreen):
         super()._render()
         self._render_visible_buttons()
 
-        # Register buttons for direct touch tap detection
+        # Register buttons for direct touch tap detection. Grow each rect by
+        # half the inter-row gap so the whole list surface is live - a tap
+        # landing in the 4px gutter hits the nearer row instead of nothing.
         if hasattr(self.hw_inputs, 'register_buttons'):
-            self.hw_inputs.register_buttons(self.buttons)
+            self.hw_inputs.register_buttons(
+                self.buttons,
+                pad_y=int(GUIConstants.LIST_ITEM_PADDING / 2),
+            )
 
         # Drag-to-scroll (touch builds only; no-op with hardware buttons)
         if hasattr(self.hw_inputs, 'register_scroll_handler') and self.has_scroll_arrows:
             self.hw_inputs.register_scroll_handler(self._handle_drag_scroll)
+
+        # Immediate press feedback on the row under the finger
+        if hasattr(self.hw_inputs, 'register_press_handler'):
+            self.hw_inputs.register_press_handler(self._handle_press_feedback)
 
         # Write the screen updates
         self.renderer.show_image()
@@ -614,6 +635,27 @@ class ButtonListScreen(BaseTopNavScreen):
                 self.hw_inputs.register_buttons(self.buttons)
             self.renderer.show_image()
 
+    def _handle_press_feedback(self, index):
+        """
+        Paint the row under the finger as pressed (or clear it when the press
+        is cancelled). Only the affected rows are re-rendered.
+        """
+        prev = getattr(self, "_pressed_index", None)
+        if prev == index:
+            return
+        self._pressed_index = index
+        with self.renderer.lock:
+            for i in (prev, index):
+                if i is None or i >= len(self.buttons):
+                    continue
+                button = self.buttons[i]
+                # The pressed row borrows the existing selected styling: it is
+                # already the brand's "this one" state, so pressing stays on
+                # brand instead of inventing a second highlight colour.
+                button.is_selected = (i == index) or (i == self.selected_button and index is None)
+                button.render()
+            self.renderer.show_image()
+
     def _fully_visible_button_indices(self) -> List[int]:
         return [
             i for i, b in enumerate(self.buttons)
@@ -668,6 +710,8 @@ class ButtonListScreen(BaseTopNavScreen):
             # screen would drag-scroll a list that is no longer on screen.
             if hasattr(self.hw_inputs, 'clear_scroll_handler'):
                 self.hw_inputs.clear_scroll_handler()
+            if hasattr(self.hw_inputs, 'clear_press_handler'):
+                self.hw_inputs.clear_press_handler()
 
     def _run_input_loop(self):
         while True:

@@ -1368,6 +1368,10 @@ class Button(BaseComponent):
     is_selected: bool = False
     is_scrollable_text: bool = True  # True: active state will automatically scroll if necessary, text is rendered once (not dynamic)
 
+    # Corner radius. Taller (touch-sized) rows need a proportionally larger
+    # radius, otherwise they read as harsher rectangles than the rest of the UI.
+    corner_radius: int = 8
+
 
     def __post_init__(self):
         if not self.font_name:
@@ -1541,7 +1545,7 @@ class Button(BaseComponent):
                 self.screen_y + self.height - self.scroll_y
             ),
             fill=background_color,
-            radius=8,
+            radius=self.corner_radius,
             outline=outline_color,
             width=2,
         )

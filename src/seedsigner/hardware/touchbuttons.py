@@ -97,7 +97,8 @@ class TouchButtons(Singleton):
         self._held_claimed = False  # A check_for_low query matched the held key
         self._tap_latch = None     # Completed-but-unclaimed tap awaiting its matching query
 
-        # Drag-to-scroll
+        # Press feedback + drag-to-scroll
+        self._press_handler = None
         self._scroll_handler = None
         self._drag_active = False
         self._drag_last_y = 0
@@ -137,6 +138,24 @@ class TouchButtons(Singleton):
         except Exception:
             return False
 
+    def register_press_handler(self, handler):
+        """
+        Register handler(button_index_or_None) called the moment a finger goes
+        DOWN on a registered button, and again with None when that press is
+        cancelled (drag-off or drag-to-scroll).
+
+        The skill guidance for touch UIs is a tactile press state (e.g. a
+        scale(0.96) on press). Animation is not an option at ~7fps on this
+        hardware, so the equivalent here is an immediate static state change:
+        the row under the finger paints as pressed before the action runs.
+        Without it, a tap has no acknowledgement until the whole next screen
+        renders, which reads as a missed tap.
+        """
+        self._press_handler = handler
+
+    def clear_press_handler(self):
+        self._press_handler = None
+
     def register_scroll_handler(self, handler):
         """
         Register a callable invoked as handler(dy_native) while the user drags
@@ -149,13 +168,18 @@ class TouchButtons(Singleton):
     def clear_scroll_handler(self):
         self._scroll_handler = None
 
-    def register_buttons(self, buttons: list):
+    def register_buttons(self, buttons: list, pad_y: int = 0):
         """
         Register button positions for direct tap detection.
 
         Args:
             buttons: List of Button objects with screen_x, screen_y, width, height.
-                     Coordinates are in native 240x240 space.
+                     Coordinates are in NATIVE canvas space.
+            pad_y:   Grow each rect by this many native px above and below, so
+                     the gaps between rows stay tappable. The visible button is
+                     unchanged; only the hit area grows (the touch-target
+                     equivalent of extending a small control with a pseudo
+                     element).
         """
         self.button_rects = []
         for i, btn in enumerate(buttons):
@@ -164,7 +188,7 @@ class TouchButtons(Singleton):
                 y = btn.screen_y - getattr(btn, 'scroll_y', 0)  # Account for scroll
                 w = getattr(btn, 'width', 240)
                 h = btn.height
-                self.button_rects.append((x, y, w, h, i))
+                self.button_rects.append((x, y - pad_y, w, h + 2 * pad_y, i))
 
     def clear_buttons(self):
         """Clear registered button positions"""
@@ -512,6 +536,12 @@ class TouchButtons(Singleton):
                             return self.KEY_PRESS
                         continue
 
+                    # Press feedback: acknowledge the touch immediately.
+                    if self._press_handler is not None:
+                        pressed_idx = self._check_button_tap(x, y)
+                        if pressed_idx >= 0:
+                            self._press_handler(pressed_idx)
+
                     # Check for direct button tap
                     if self.KEY_PRESS in keys:
                         btn_idx = self._check_button_tap(x, y)
@@ -561,6 +591,8 @@ class TouchButtons(Singleton):
                             # anything, and any tap flags latched at touch-down
                             # must be dropped.
                             self._drag_active = True
+                            if self._press_handler is not None:
+                                self._press_handler(None)   # press became a scroll
                             pending_key = None
                             pending_zone = None
                             self._tapped_button_index = -1
@@ -595,6 +627,8 @@ class TouchButtons(Singleton):
                         release_zone = self._tap_zone(x, y, keys, nav_relative_center)
                         if release_zone != pending_zone:
                             logger.debug(f"Tap cancelled: down zone {pending_zone} != release zone {release_zone}")
+                            if self._press_handler is not None:
+                                self._press_handler(None)
                             pending_key = None
                             pending_zone = None
                             self.cur_input = None
