@@ -94,6 +94,6 @@ class DisplayDriverFactory:
 
         elif display_type == DISPLAY_TYPE__DPI28:
             from seedsigner.hardware.DPI28 import DPI28
-            # The driver renders the 240x240 UI upscaled onto the 480x640 panel and
-            # reports the native UI size to the Renderer.
+            # The driver renders the native UI 2x-upscaled onto the 480x640
+            # panel and reports the native size to the Renderer.
             return DPI28(_width=DPI28.NATIVE_WIDTH, _height=DPI28.NATIVE_HEIGHT)

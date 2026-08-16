@@ -51,10 +51,10 @@ class E2ERenderer(Renderer):
         # Screens resolve the singleton via the base class
         Renderer._instance = renderer
         renderer.canvas_width = 240
-        renderer.canvas_height = 240
-        renderer.canvas = Image.new("RGB", (240, 240))
+        renderer.canvas_height = 320          # full-panel native size
+        renderer.canvas = Image.new("RGB", (240, 320))
         renderer.draw = ImageDraw.Draw(renderer.canvas)
-        renderer.disp = DPI28Emulator(_width=240, _height=240)
+        renderer.disp = DPI28Emulator(_width=240, _height=320)
         renderer.display_type = "dpi28"
         renderer.frames = 0
 
@@ -147,21 +147,17 @@ def scenario(name):
     return deco
 
 
-@scenario("button_list_two_tap_select_then_confirm")
+@scenario("button_list_single_tap_activates")
 def s1():
-    # Anti-fat-finger contract: tapping a NON-selected item only moves the
-    # selection; a second tap on the now-selected item confirms it.
+    # Tap-driven UX: a tap on any list item activates it directly. Scrolling
+    # is a drag gesture now, so a tap is unambiguous.
     from seedsigner.gui.screens.screen import ButtonListScreen, ButtonOption
     screen = ButtonListScreen(title="Test", button_data=[
         ButtonOption("Alpha"), ButtonOption("Bravo"), ButtonOption("Charlie")])
     t, holder = run_screen_async(screen)
     wait_for_render(screen, holder)
     x, y = button_center_screen_coords(screen, 1)
-    tap(x, y)          # first tap: select only
-    time.sleep(0.4)
-    assert "result" not in holder, "single tap on non-selected item must not activate"
-    x, y = button_center_screen_coords(screen, 1)  # re-read: may have scrolled
-    tap(x, y)          # second tap: confirm
+    tap(x, y)
     assert finish(t, holder) == 1
 
 
@@ -176,16 +172,21 @@ def s2():
     assert finish(t, holder) == RET_CODE__BACK_BUTTON
 
 
-@scenario("touch_bar_down_then_select")
+@scenario("overlay_bar_keys_work_when_shown")
 def s3():
+    # Lists are full-bleed now (drag + tap), so the bar only exists where a
+    # screen asks for one. When it IS shown, its thirds must still map to
+    # KEY1/KEY2/KEY3 - that is how keyboards and the camera get DEL/OK/shutter.
     from seedsigner.gui.screens.screen import ButtonListScreen, ButtonOption
     screen = ButtonListScreen(title="Test", button_data=[
         ButtonOption("Alpha"), ButtonOption("Bravo"), ButtonOption("Charlie")])
     t, holder = run_screen_async(screen)
     wait_for_render(screen, holder)
-    tap(400, 560)   # touch bar right third = KEY3 (down)
+    screen._set_touch_bar('TOUCH_BAR_DEFAULT')   # opt this screen into a bar
+    time.sleep(0.1)
+    tap(400, 560)   # bar right third = KEY3 (down)
     time.sleep(0.3)
-    tap(240, 560)   # touch bar middle = KEY2 (select)
+    tap(240, 560)   # bar middle = KEY2 (select)
     assert finish(t, holder) == 1
 
 
@@ -197,9 +198,7 @@ def s4():
     t, holder = run_screen_async(screen)
     wait_for_render(screen, holder)
     x, y = button_center_screen_coords(screen, 2)
-    tap(x, y)          # select
-    time.sleep(0.4)
-    tap(x, y)          # confirm
+    tap(x, y)          # single tap activates a grid tile
     assert finish(t, holder) == 2
 
 
@@ -234,11 +233,83 @@ def s6():
     x, y = button_center_screen_coords(screen, 0)  # the SELECTED button (would fire on tap)
     touch.inject_event("down", x, y)
     time.sleep(0.05)
-    touch.inject_event("up", 240, 300)  # released on empty UI area
+    # Release far from where the touch started. With a full-panel canvas the
+    # old "empty" point sat inside the same button, so this now targets the
+    # bottom strip, which is empty content while no bar is shown.
+    touch.inject_event("up", 240, 620)
     time.sleep(0.4)
     assert "result" not in holder, f"drag-off activated: {holder.get('result')!r}"
     tap(x, y)  # clean tap on selected button activates
     assert finish(t, holder) == 0
+
+
+@scenario("drag_scrolls_list_without_activating")
+def s7():
+    # A vertical drag must scroll the list and activate NOTHING, even though
+    # it starts on top of a button.
+    from seedsigner.gui.screens.screen import ButtonListScreen, ButtonOption
+    screen = ButtonListScreen(title="Long list", button_data=[
+        ButtonOption(f"Item {i}") for i in range(15)])
+    t, holder = run_screen_async(screen)
+    wait_for_render(screen, holder)
+    assert screen.has_scroll_arrows, "test needs a scrollable list"
+
+    before = screen.buttons[0].scroll_y
+    touch = TouchButtons.get_instance().touch
+    x, y = button_center_screen_coords(screen, 0)
+    touch.inject_event("down", x, y)
+    # drag upward in steps (finger moves up => content scrolls down the list)
+    for step in range(1, 7):
+        touch.inject_event("move", x, y - step * 20)
+        time.sleep(0.05)
+    touch.inject_event("up", x, y - 120)
+    time.sleep(0.5)
+
+    after = screen.buttons[0].scroll_y
+    assert "result" not in holder, f"drag activated item {holder.get('result')!r}"
+    assert after > before, f"list did not scroll (scroll_y {before} -> {after})"
+
+    # and the list is still usable afterwards: a clean tap activates
+    idx = next(i for i, b in enumerate(screen.buttons)
+               if b.screen_y - b.scroll_y >= screen.top_nav.height
+               and b.screen_y - b.scroll_y + b.height <= screen.down_arrow_img_y)
+    x, y = button_center_screen_coords(screen, idx)
+    tap(x, y)
+    assert finish(t, holder) == idx
+
+
+@scenario("drag_stops_at_list_bounds")
+def s8():
+    # Over-dragging must clamp, not run the content off into space.
+    from seedsigner.gui.screens.screen import ButtonListScreen, ButtonOption
+    screen = ButtonListScreen(title="Long list", button_data=[
+        ButtonOption(f"Item {i}") for i in range(15)])
+    t, holder = run_screen_async(screen)
+    wait_for_render(screen, holder)
+    touch = TouchButtons.get_instance().touch
+
+    # yank far past the end
+    touch.inject_event("down", 240, 400)
+    for step in range(1, 20):
+        touch.inject_event("move", 240, 400 - step * 40)
+        time.sleep(0.02)
+    touch.inject_event("up", 240, 20)
+    time.sleep(0.5)
+    assert screen.buttons[0].scroll_y <= screen._max_scroll_y(), "scrolled past the end"
+
+    # and back past the top
+    touch.inject_event("down", 240, 100)
+    for step in range(1, 20):
+        touch.inject_event("move", 240, 100 + step * 40)
+        time.sleep(0.02)
+    touch.inject_event("up", 240, 460)
+    time.sleep(0.5)
+    assert screen.buttons[0].scroll_y == 0, f"scroll_y {screen.buttons[0].scroll_y} != 0 at top"
+
+    idx = 0
+    x, y = button_center_screen_coords(screen, idx)
+    tap(x, y)
+    assert finish(t, holder) == idx
 
 
 def main():
@@ -251,7 +322,7 @@ def main():
     E2ERenderer.configure_instance()
 
     with patch("seedsigner.controller.Controller.get_instance", return_value=controller):
-        for fn in (s1, s2, s3, s4, s5, s6):
+        for fn in (s1, s2, s3, s4, s5, s6, s7, s8):
             fn()
 
     print(f"\n{len(PASSED)} passed, {len(FAILED)} failed")

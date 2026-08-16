@@ -71,6 +71,26 @@ class BaseScreen(BaseComponent):
         self.scroll_y = 0
 
 
+    # Native-pixel height of the control bar overlay (160 panel px / 2).
+    TOUCH_BAR_NATIVE_HEIGHT = 80
+
+    # Screens that display a control bar AND lay out content underneath it
+    # must reserve that space, because the bar is now an overlay on a
+    # full-bleed canvas rather than a strip below a shorter one. Full-screen
+    # image screens (camera, QR) deliberately do NOT reserve: an overlay on
+    # top of the image is the intended look.
+    # NOTE: deliberately un-annotated. BaseScreen is a @dataclass, so an
+    # annotated attribute becomes a FIELD whose inherited default (False)
+    # overwrites any subclass override at instance-construction time.
+    reserves_touch_bar = False
+
+    @property
+    def usable_canvas_height(self) -> int:
+        """Canvas height minus the control bar, when this screen shows one."""
+        if self.reserves_touch_bar and os.environ.get('SEEDSIGNER_TOUCH') == '1':
+            return self.canvas_height - self.TOUCH_BAR_NATIVE_HEIGHT
+        return self.canvas_height
+
     def _set_touch_bar(self, preset_name: str):
         """Set touch bar preset by name (e.g. 'TOUCH_BAR_BACK', 'TOUCH_BAR_HIDDEN')"""
         if os.environ.get('SEEDSIGNER_TOUCH') != '1':
@@ -352,6 +372,11 @@ class ButtonListScreen(BaseTopNavScreen):
     # ensure the screen is at least scrolled to reveal the `selected_button`.
     scroll_y_initial_offset: int = None
 
+    # Touch: a single tap on a list item activates it (scrolling is a drag
+    # gesture, so taps no longer double as navigation). Screens that want the
+    # older select-then-confirm behavior can set this False.
+    single_tap_select: bool = True
+
 
     def __post_init__(self):
         if not self.button_font_name:
@@ -447,8 +472,13 @@ class ButtonListScreen(BaseTopNavScreen):
         self._set_touch_bar_default()
 
     def _set_touch_bar_default(self):
-        """Reset touch bar to default with scroll arrows"""
-        self._update_touch_bar_for_list_position()
+        """
+        Lists are driven by drag-to-scroll and direct tap, so they render
+        full-bleed with no control bar. (The bar was an emulation of the
+        hardware up/select/down buttons; it now only appears where it offers
+        an action that has no on-screen equivalent, e.g. keyboards, camera.)
+        """
+        self._set_touch_bar('TOUCH_BAR_HIDDEN')
 
     def _update_touch_bar_for_list_position(self):
         """Update touch bar based on current list scroll position"""
@@ -479,6 +509,10 @@ class ButtonListScreen(BaseTopNavScreen):
         # Register buttons for direct touch tap detection
         if hasattr(self.hw_inputs, 'register_buttons'):
             self.hw_inputs.register_buttons(self.buttons)
+
+        # Drag-to-scroll (touch builds only; no-op with hardware buttons)
+        if hasattr(self.hw_inputs, 'register_scroll_handler') and self.has_scroll_arrows:
+            self.hw_inputs.register_scroll_handler(self._handle_drag_scroll)
 
         # Write the screen updates
         self.renderer.show_image()
@@ -519,6 +553,83 @@ class ButtonListScreen(BaseTopNavScreen):
                 # Render the button after the arrows to cover up overlap
                 button.render()
 
+        if self.has_scroll_arrows:
+            # Buttons are drawn unclipped, so with free-form drag scrolling a
+            # partially-scrolled item paints straight over the title bar (the
+            # old whole-button-step scrolling could never land there). Repaint
+            # the header last so the list appears to slide UNDER it.
+            self.image_draw.rectangle(
+                (0, 0, self.canvas_width, self.top_nav.height),
+                fill=GUIConstants.BACKGROUND_COLOR
+            )
+            self.top_nav.render()
+
+
+    def _max_scroll_y(self) -> int:
+        """How far the list can scroll before its last item sits at the bottom."""
+        if not self.has_scroll_arrows or not self.buttons:
+            return 0
+        last = self.buttons[-1]
+        content_bottom = last.screen_y + last.height
+        return max(0, content_bottom + GUIConstants.EDGE_PADDING - self.down_arrow_img_y)
+
+    def _handle_drag_scroll(self, dy_native: float):
+        """
+        Drag-to-scroll callback (registered with the touch input handler).
+
+        dy_native > 0 means the finger moved DOWN, which moves content down,
+        i.e. decreases scroll offset - content tracks the finger, as every
+        touch UI does.
+
+        Sub-pixel movement is accumulated rather than dropped, so a slow drag
+        still scrolls. Rendering is inherently throttled: the touch layer
+        coalesces to the newest position, so however many move events arrive
+        while a frame is being pushed collapse into one.
+        """
+        if not self.has_scroll_arrows or not self.buttons:
+            return
+
+        self._drag_scroll_residual = getattr(self, "_drag_scroll_residual", 0.0) + dy_native
+        delta = int(self._drag_scroll_residual)
+        if delta == 0:
+            return
+        self._drag_scroll_residual -= delta
+
+        cur = self.buttons[0].scroll_y
+        new = max(0, min(self._max_scroll_y(), cur - delta))
+        if new == cur:
+            return
+
+        with self.renderer.lock:
+            for button in self.buttons:
+                button.scroll_y = new
+
+            # Keep the highlight inside the viewport. Left alone it stays stuck
+            # on an item that has scrolled away, which looks broken and makes
+            # the bar's SELECT act on something the user cannot see.
+            self._keep_selection_visible()
+
+            self._render_visible_buttons(clear_first=True)
+            if hasattr(self.hw_inputs, "register_buttons"):
+                self.hw_inputs.register_buttons(self.buttons)
+            self.renderer.show_image()
+
+    def _fully_visible_button_indices(self) -> List[int]:
+        return [
+            i for i, b in enumerate(self.buttons)
+            if b.screen_y - b.scroll_y >= self.top_nav.height
+            and b.screen_y - b.scroll_y + b.height <= self.down_arrow_img_y
+        ]
+
+    def _keep_selection_visible(self):
+        """Move the selection to the nearest on-screen item after a scroll."""
+        visible = self._fully_visible_button_indices()
+        if not visible or self.selected_button in visible:
+            return
+        self.buttons[self.selected_button].is_selected = False
+        # Scrolled down past it -> take the top item; scrolled up -> the bottom
+        self.selected_button = visible[0] if self.selected_button < visible[0] else visible[-1]
+        self.buttons[self.selected_button].is_selected = True
 
     def _render_up_arrow(self):
         self.canvas.paste(self.up_arrow_img, (int(self.canvas_width / 2) - self.arrow_half_width, self.up_arrow_img_y))
@@ -550,6 +661,15 @@ class ButtonListScreen(BaseTopNavScreen):
         if hasattr(self.hw_inputs, 'clear_pending_input'):
             self.hw_inputs.clear_pending_input()
 
+        try:
+            return self._run_input_loop()
+        finally:
+            # Never leave this screen's scroll callback registered: the next
+            # screen would drag-scroll a list that is no longer on screen.
+            if hasattr(self.hw_inputs, 'clear_scroll_handler'):
+                self.hw_inputs.clear_scroll_handler()
+
+    def _run_input_loop(self):
         while True:
             ret = self._run_callback()
             if ret is not None:
@@ -610,8 +730,7 @@ class ButtonListScreen(BaseTopNavScreen):
                         else:
                             cur_selected_button.render()
                             next_selected_button.render()
-                        # Update touch bar to show which arrows are active
-                        self._update_touch_bar_for_list_position()
+
 
                 elif user_input == HardwareButtonsConstants.KEY_DOWN or (
                         _is_touch_mode() and user_input == HardwareButtonsConstants.KEY3) or (
@@ -654,8 +773,7 @@ class ButtonListScreen(BaseTopNavScreen):
                         if cur_selected_button:
                             cur_selected_button.render()
                         next_selected_button.render()
-                    # Update touch bar to show which arrows are active
-                    self._update_touch_bar_for_list_position()
+
 
                 elif user_input in (
                         [HardwareButtonsConstants.KEY2, HardwareButtonsConstants.KEY_PRESS]
@@ -673,8 +791,20 @@ class ButtonListScreen(BaseTopNavScreen):
                     if hasattr(self.hw_inputs, 'get_tapped_button_index'):
                         tapped_idx = self.hw_inputs.get_tapped_button_index()
                         if tapped_idx >= 0 and tapped_idx < len(self.buttons):
-                            if tapped_idx == self.selected_button:
-                                # Tapped already-selected button - toggle/select it
+                            if tapped_idx == self.selected_button or self.single_tap_select:
+                                # Direct tap activates. Scrolling is a drag gesture
+                                # now, so a tap is unambiguous: it can only land on
+                                # a button, it activates on RELEASE, and the release
+                                # must occur on the same button (drag-off cancels).
+                                # Show the selection first so the user sees which
+                                # item they hit before the screen changes.
+                                if tapped_idx != self.selected_button:
+                                    self.buttons[self.selected_button].is_selected = False
+                                    self.buttons[self.selected_button].render()
+                                    self.selected_button = tapped_idx
+                                    self.buttons[tapped_idx].is_selected = True
+                                    self.buttons[tapped_idx].render()
+                                    self.renderer.show_image()
                                 return tapped_idx
                             else:
                                 # Tapped different button - move selection and scroll if needed
@@ -743,7 +873,10 @@ class LargeButtonScreen(BaseTopNavScreen):
 
     button_selected_color: str = GUIConstants.ACCENT_COLOR
     selected_button: int = 0
-    single_tap_buttons: bool = False  # If True, all buttons activate on first tap
+    # Touch: tap a tile to activate it. Grid tiles are large, unambiguous
+    # targets and the grid does not scroll, so requiring a second tap only
+    # added friction. (Activation is still on RELEASE, on the same tile.)
+    single_tap_buttons: bool = True
 
     def __post_init__(self):
         if not self.button_font_name:
@@ -820,9 +953,15 @@ class LargeButtonScreen(BaseTopNavScreen):
         if hasattr(self.hw_inputs, 'register_buttons'):
             self.hw_inputs.register_buttons(self.buttons)
 
-        # Set touch bar based on screen type
+        # Set touch bar based on screen type. With single-tap tiles the bar has
+        # no selection role left, so hide it - but keep an explicit Back
+        # control when the screen has one, since the top-left corner tap is
+        # not self-evident.
         if self.single_tap_buttons:
-            self._set_touch_bar('TOUCH_BAR_HIDDEN')
+            if self.top_nav.show_back_button:
+                self._set_touch_bar('TOUCH_BAR_BACK')
+            else:
+                self._set_touch_bar('TOUCH_BAR_HIDDEN')
         else:
             self._set_touch_bar('TOUCH_BAR_SELECT_ONLY')
 

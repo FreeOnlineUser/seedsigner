@@ -20,6 +20,15 @@ from seedsigner.hardware.touchbuttons import (
 )
 
 
+def _bar_shown(tb, shown=True):
+    """
+    The control bar is now an OVERLAY: taps below TOUCH_BAR_TOP only mean
+    KEY1/2/3 while a screen is actually showing a bar. Tests that exercise bar
+    geometry must say so; without this the bottom strip is ordinary content.
+    """
+    tb._bar_visible = lambda: shown
+    return tb
+
 class TestCoordsToNavKey:
     """Test _coords_to_nav_key() mapping of screen coordinates to key codes."""
 
@@ -28,7 +37,7 @@ class TestCoordsToNavKey:
         # Reset singleton
         TouchButtons._instance = None
         tb = TouchButtons.get_instance()
-        return tb
+        return _bar_shown(tb)
 
     # --- Touch bar (y >= 480) maps to KEY1/KEY2/KEY3 ---
 
@@ -111,7 +120,7 @@ class TestBackAndPowerButtons:
 
     def _make_buttons(self):
         TouchButtons._instance = None
-        return TouchButtons.get_instance()
+        return _bar_shown(TouchButtons.get_instance())
 
     # --- Back button (top-left, native < 48x48 = screen < 96x96) ---
 
@@ -158,7 +167,7 @@ class TestButtonTapDetection:
 
     def _make_buttons(self):
         TouchButtons._instance = None
-        return TouchButtons.get_instance()
+        return _bar_shown(TouchButtons.get_instance())
 
     def _mock_button(self, screen_x, screen_y, width, height):
         """Create a mock button object with position attributes."""
@@ -224,7 +233,7 @@ class TestTapStateReadAndReset:
 
     def _make_buttons(self):
         TouchButtons._instance = None
-        return TouchButtons.get_instance()
+        return _bar_shown(TouchButtons.get_instance())
 
     def test_tapped_button_index_resets(self):
         """get_tapped_button_index() returns value then resets to -1."""
@@ -318,20 +327,22 @@ class TestCoordsToNavKeyCenterRelative:
 
     def _make_buttons(self):
         TouchButtons._instance = None
-        return TouchButtons.get_instance()
+        return _bar_shown(TouchButtons.get_instance())
 
     # --- UI area pans by dominant axis from centre (240, 240) ---
 
     def test_bottom_center_is_down(self):
         """Bottom-centre tap pans DOWN (the reported failure case)."""
         tb = self._make_buttons()
-        assert tb._coords_to_nav_key_center_relative(240, 400) == tb.KEY_DOWN
+        # Centre is now (240, 320) and the dead zone is 0.15 * 640 = 96px, so
+        # "below centre but above the bar" is 416 < y < 480.
+        assert tb._coords_to_nav_key_center_relative(240, 460) == tb.KEY_DOWN
 
     def test_just_below_centre_is_down_not_exit(self):
         """A tap just below the centred cell pans DOWN. In the old mapping this
         band was a KEY_PRESS exit; it must no longer exit."""
         tb = self._make_buttons()
-        assert tb._coords_to_nav_key_center_relative(240, 330) == tb.KEY_DOWN
+        assert tb._coords_to_nav_key_center_relative(240, 430) == tb.KEY_DOWN
 
     def test_top_center_is_up(self):
         tb = self._make_buttons()
@@ -364,8 +375,10 @@ class TestCoordsToNavKeyCenterRelative:
         """(240, 200) returned KEY_PRESS (exit) under the default mapping; under the
         pan mapping it is inside the dead zone -> no-op, never an exit."""
         tb = self._make_buttons()
-        assert tb._coords_to_nav_key(240, 200) == tb.KEY_PRESS  # old behaviour
-        assert tb._coords_to_nav_key_center_relative(240, 200) == -1  # new behaviour
+        # Centre of the panel is now (240, 320): the UI fills all 640px rather
+        # than the old 480px above a permanent bar.
+        assert tb._coords_to_nav_key(240, 300) == tb.KEY_PRESS  # old behaviour
+        assert tb._coords_to_nav_key_center_relative(240, 300) == -1  # new behaviour
 
     # --- Exit still works via the touch bar ---
 
@@ -390,7 +403,7 @@ class TestCheckForLowKeyAware:
         TouchButtons._instance = None
         tb = TouchButtons.get_instance()
         tb.touch = MagicMock()
-        return tb
+        return _bar_shown(tb)
 
     def test_ui_tap_is_press_not_back(self):
         """The camera-preview bug: a tap on the image must NOT read as back
@@ -457,7 +470,7 @@ class TestCheckForLowTapLatch:
         TouchButtons._instance = None
         tb = TouchButtons.get_instance()
         tb.touch = MagicMock()
-        return tb
+        return _bar_shown(tb)
 
     def _preview_iteration(self, tb):
         """One iteration of the camera preview loop's polling order."""

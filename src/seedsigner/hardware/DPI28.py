@@ -71,20 +71,27 @@ class DPI28(BaseDisplayDriver):
     physical 480x640 layout is internal to this driver).
     """
 
-    # Native UI size (what SeedSigner renders)
+    # Native UI size (what SeedSigner renders). 240x320 is the panel's true
+    # 3:4 ratio, so a 2x nearest-neighbour upscale fills the whole 480x640
+    # panel exactly - no letterbox, no reserved strip. (This replaced a
+    # 240x240 canvas whose 480x480 output left the bottom 160px as a
+    # permanent button bar.)
     NATIVE_WIDTH = 240
-    NATIVE_HEIGHT = 240
+    NATIVE_HEIGHT = 320
 
     # Physical display size
     DISPLAY_WIDTH = 480
     DISPLAY_HEIGHT = 640
 
-    # Scaled UI area
+    # Scaled UI area == the full panel
     UI_WIDTH = 480
-    UI_HEIGHT = 480
+    UI_HEIGHT = 640
 
-    # Touch bar
+    # The touch bar is now an OVERLAY over the bottom of the panel, drawn only
+    # while a screen actually asks for one (keyboards, camera). Screens that
+    # do not set a preset render full-bleed.
     TOUCH_BAR_HEIGHT = 160
+    TOUCH_BAR_TOP = DISPLAY_HEIGHT - TOUCH_BAR_HEIGHT
 
     # Touch bar label presets: (icons_tuple, colors_tuple, font_types_tuple)
     _UP = TouchBarIcons.CHEVRON_UP
@@ -126,12 +133,13 @@ class DPI28(BaseDisplayDriver):
         self.length = None
         self.tty_fd = None  # For console mode control
 
-        # Current touch bar labels
-        self._current_labels = self.TOUCH_BAR_DEFAULT
+        # Current touch bar labels. Default is HIDDEN: the bar only appears
+        # when a screen explicitly asks for one.
+        self._current_labels = self.TOUCH_BAR_HIDDEN
 
         # Cache touch bars for different label sets
         self._touch_bar_cache = {}
-        self._touch_bar = self._get_touch_bar(self.TOUCH_BAR_DEFAULT)
+        self._touch_bar = self._get_touch_bar(self.TOUCH_BAR_HIDDEN)
 
         # Initialize framebuffer
         self._init_framebuffer()
@@ -299,14 +307,21 @@ class DPI28(BaseDisplayDriver):
         Pure PIL, no framebuffer access — also used by the emulator/screenshot
         paths to render exactly what the panel would show.
         """
-        # Scale 240x240 -> 480x480 using nearest neighbor (sharp pixels)
-        scaled = image.resize((self.UI_WIDTH, self.UI_HEIGHT), Image.NEAREST)
+        # Scale the native canvas 2x to the full panel (nearest neighbour so
+        # pixels stay sharp rather than smeared).
+        display = image.resize((self.UI_WIDTH, self.UI_HEIGHT), Image.NEAREST)
+        if display.mode != 'RGB':
+            display = display.convert('RGB')
 
-        # Create full display image
-        display = Image.new('RGB', (self.DISPLAY_WIDTH, self.DISPLAY_HEIGHT))
-        display.paste(scaled, (0, 0))
-        display.paste(self._touch_bar, (0, self.UI_HEIGHT))
+        # Overlay the control bar only if a screen asked for one.
+        if self._current_labels is not self.TOUCH_BAR_HIDDEN:
+            display.paste(self._touch_bar, (0, self.TOUCH_BAR_TOP))
         return display
+
+    @property
+    def is_touch_bar_visible(self) -> bool:
+        """True when a control bar is currently overlaid on the panel."""
+        return self._current_labels is not self.TOUCH_BAR_HIDDEN
 
     def show_image(self, image: Image.Image, x_start: int = 0, y_start: int = 0):
         """
@@ -463,9 +478,10 @@ class DPI28Emulator(DPI28):
         self.frame_count = 0
         self.on_frame = None  # Optional callable(Image) for tests
 
-        self._current_labels = self.TOUCH_BAR_DEFAULT
+        # Match the real driver: no bar unless a screen asks for one.
+        self._current_labels = self.TOUCH_BAR_HIDDEN
         self._touch_bar_cache = {}
-        self._touch_bar = self._get_touch_bar(self.TOUCH_BAR_DEFAULT)
+        self._touch_bar = self._get_touch_bar(self.TOUCH_BAR_HIDDEN)
 
     def show_image(self, image: Image.Image, x_start: int = 0, y_start: int = 0):
         display = self.compose(image)

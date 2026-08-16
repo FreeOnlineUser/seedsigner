@@ -52,7 +52,10 @@ class TouchButtons(Singleton):
     # Touch bar: 480x160 (bottom) - KEY1, KEY2, KEY3
     SCREEN_WIDTH = 480
     SCREEN_HEIGHT = 640
-    UI_HEIGHT = 480
+    # The UI now fills the whole panel (240x320 native, 2x upscaled). The
+    # control bar is an OVERLAY that only exists while a screen asks for one,
+    # so the bottom strip is ordinary content the rest of the time.
+    UI_HEIGHT = 640
     TOUCH_BAR_TOP = 480
 
     # Re-export constants
@@ -94,6 +97,12 @@ class TouchButtons(Singleton):
         self._held_claimed = False  # A check_for_low query matched the held key
         self._tap_latch = None     # Completed-but-unclaimed tap awaiting its matching query
 
+        # Drag-to-scroll
+        self._scroll_handler = None
+        self._drag_active = False
+        self._drag_last_y = 0
+        self._drag_total = 0
+
         # Direct tap support
         # List of (x, y, width, height, index) in NATIVE coords (240x240)
         self.button_rects: List[Tuple[int, int, int, int, int]] = []
@@ -105,6 +114,40 @@ class TouchButtons(Singleton):
         # Last tap coordinates in native space (240x240) for keyboard detection
         self._last_tap_native_x = -1
         self._last_tap_native_y = -1
+
+    # A touch that moves more than this (screen px) before release is a DRAG,
+    # not a tap: it scrolls and must never activate whatever was under the
+    # finger. Small enough that a deliberate swipe registers immediately,
+    # large enough that finger roll during a tap does not.
+    DRAG_THRESHOLD_PX = 10
+
+    def _bar_visible(self) -> bool:
+        """
+        Is a control bar currently overlaid on the bottom of the panel?
+
+        When it is, taps below TOUCH_BAR_TOP belong to the bar. When it is
+        not, that strip is ordinary content and must be hit-tested like the
+        rest of the screen - otherwise the bottom fifth of every full-bleed
+        screen would silently swallow taps.
+        """
+        try:
+            from seedsigner.gui.renderer import Renderer
+            disp = Renderer.get_instance().disp
+            return bool(getattr(disp, "is_touch_bar_visible", False))
+        except Exception:
+            return False
+
+    def register_scroll_handler(self, handler):
+        """
+        Register a callable invoked as handler(dy_native) while the user drags
+        vertically. dy_native is the movement since the last callback in NATIVE
+        (240x240) pixels: positive = finger moved down (content follows finger).
+        A screen registers this to become drag-scrollable.
+        """
+        self._scroll_handler = handler
+
+    def clear_scroll_handler(self):
+        self._scroll_handler = None
 
     def register_buttons(self, buttons: list):
         """
@@ -246,8 +289,8 @@ class TouchButtons(Singleton):
         if not self.button_rects:
             return -1
 
-        # Only check UI area, not touch bar
-        if touch_y >= self.TOUCH_BAR_TOP:
+        # The bar (when shown) is not part of the list
+        if touch_y >= self.TOUCH_BAR_TOP and self._bar_visible():
             return -1
 
         # Convert screen coords (480x480) to native coords (240x240)
@@ -278,8 +321,8 @@ class TouchButtons(Singleton):
         Returns:
             Key code (KEY_UP, KEY_DOWN, etc.)
         """
-        # Touch bar - KEY1, KEY2, KEY3
-        if y >= self.TOUCH_BAR_TOP:
+        # Touch bar - KEY1, KEY2, KEY3 (only while a bar is actually shown)
+        if y >= self.TOUCH_BAR_TOP and self._bar_visible():
             third = self.SCREEN_WIDTH // 3
             if x < third:
                 return self.KEY1
@@ -332,7 +375,7 @@ class TouchButtons(Singleton):
             A KEY_* code, or -1 for a near-centre no-op (ignored by wait_for).
         """
         # Touch bar -> exit buttons, identical to the default mapping.
-        if y >= self.TOUCH_BAR_TOP:
+        if y >= self.TOUCH_BAR_TOP and self._bar_visible():
             third = self.SCREEN_WIDTH // 3
             if x < third:
                 return self.KEY1
@@ -433,9 +476,15 @@ class TouchButtons(Singleton):
                     self.last_touch_x = x
                     self.last_touch_y = y
                     pending_zone = self._tap_zone(x, y, keys, nav_relative_center)
+                    # Begin (potential) drag tracking. Nothing scrolls until the
+                    # finger passes DRAG_THRESHOLD_PX, so a plain tap is unaffected.
+                    self._drag_active = False
+                    self._drag_last_y = y
+                    self._drag_total = 0
 
-                    # Store native coords for keyboard tap detection (only in UI area)
-                    if y < self.TOUCH_BAR_TOP:
+                    # Store native coords for keyboard/grid tap detection. Skip
+                    # only the bar region, and only while a bar is showing.
+                    if y < self.TOUCH_BAR_TOP or not self._bar_visible():
                         self._last_tap_native_x = x // 2
                         self._last_tap_native_y = y // 2
 
@@ -502,11 +551,43 @@ class TouchButtons(Singleton):
                         # Otherwise wait for release
                         continue
 
+                elif event_type == 'move':
+                    # Only the UI area scrolls; the touch bar is a button strip.
+                    if self._scroll_handler is not None and (
+                            self.last_touch_y < self.TOUCH_BAR_TOP or not self._bar_visible()):
+                        self._drag_total += abs(y - self._drag_last_y)
+                        if not self._drag_active and self._drag_total >= self.DRAG_THRESHOLD_PX:
+                            # Promote to a drag: this touch can no longer activate
+                            # anything, and any tap flags latched at touch-down
+                            # must be dropped.
+                            self._drag_active = True
+                            pending_key = None
+                            pending_zone = None
+                            self._tapped_button_index = -1
+                            self._back_button_tapped = False
+                            self._power_button_tapped = False
+                            self._touch_bar_back_tapped = False
+                            self._last_tap_native_x = -1
+                            self._last_tap_native_y = -1
+                        if self._drag_active:
+                            dy_screen = y - self._drag_last_y
+                            if dy_screen:
+                                self.last_input_time = cur_time
+                                # Panel is a 2x upscale of the 240x240 canvas
+                                self._scroll_handler(dy_screen / 2.0)
+                    self._drag_last_y = y
+
                 elif event_type == 'up':
                     self.touch_down = False
                     self._held_key = None
                     self._tap_latch = None
                     logger.debug(f"Release, pending_key: {pending_key}")
+                    if self._drag_active:
+                        # Finished a scroll gesture: consume it, activate nothing.
+                        self._drag_active = False
+                        pending_key = None
+                        pending_zone = None
+                        continue
                     if pending_key is not None:
                         # Drag-off-to-cancel: only activate if the release landed in
                         # the same zone as the touch-down. A finger that slid onto a
@@ -570,7 +651,7 @@ class TouchButtons(Singleton):
         """
         if self._check_back_button_tap(x, y):
             return self.KEY1
-        if y >= self.TOUCH_BAR_TOP:
+        if y >= self.TOUCH_BAR_TOP and self._bar_visible():
             third = self.SCREEN_WIDTH // 3
             if x < third:
                 return self.KEY1

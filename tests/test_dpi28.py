@@ -291,6 +291,9 @@ class TestTouchBarCache:
     def test_set_touch_bar_labels_same_noop(self):
         """set_touch_bar_labels() with same preset is a no-op."""
         driver = self._make_driver()
+        # Drivers now start with no bar, so re-setting the CURRENT preset is
+        # the no-op case (previously the default happened to be DEFAULT).
+        driver.set_touch_bar_labels(DPI28.TOUCH_BAR_DEFAULT)
         original = driver._touch_bar
         driver.set_touch_bar_labels(DPI28.TOUCH_BAR_DEFAULT)
         assert driver._touch_bar is original
@@ -307,12 +310,15 @@ class TestDriverConstants:
         """Driver reports 240x240 native size to SeedSigner."""
         driver = self._make_driver()
         assert driver.width == 240
-        assert driver.height == 240
+        assert driver.height == 320
 
     def test_display_constants(self):
         """Display constants match Waveshare 2.8" specs."""
         assert DPI28.DISPLAY_WIDTH == 480
         assert DPI28.DISPLAY_HEIGHT == 640
-        assert DPI28.UI_HEIGHT == 480
+        assert DPI28.UI_HEIGHT == 640
         assert DPI28.TOUCH_BAR_HEIGHT == 160
-        assert DPI28.UI_HEIGHT + DPI28.TOUCH_BAR_HEIGHT == DPI28.DISPLAY_HEIGHT
+        # The bar is an OVERLAY now, so the UI fills the panel outright and
+        # the bar sits on top of its bottom TOUCH_BAR_HEIGHT pixels.
+        assert DPI28.UI_HEIGHT == DPI28.DISPLAY_HEIGHT
+        assert DPI28.TOUCH_BAR_TOP == DPI28.DISPLAY_HEIGHT - DPI28.TOUCH_BAR_HEIGHT

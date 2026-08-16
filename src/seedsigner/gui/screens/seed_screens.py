@@ -24,6 +24,10 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class SeedMnemonicEntryScreen(BaseTopNavScreen):
+    # Shows a control bar (DEL / OK / scroll) and lays out keys underneath it,
+    # so the overlay's footprint must be excluded from the layout area.
+    reserves_touch_bar = True
+
     initial_letters: list = None
     wordlist: list = None
 
@@ -550,6 +554,10 @@ class SeedMnemonicEntryScreen(BaseTopNavScreen):
 
 @dataclass
 class SeedMnemonicEntryT9Screen(BaseTopNavScreen):
+    # Shows a control bar (DEL / OK / scroll) and lays out keys underneath it,
+    # so the overlay's footprint must be excluded from the layout area.
+    reserves_touch_bar = True
+
     """
     T9 keyboard for seed word entry (touchscreen-optimized).
 
@@ -591,7 +599,7 @@ class SeedMnemonicEntryT9Screen(BaseTopNavScreen):
                 GUIConstants.EDGE_PADDING,
                 t9_top,
                 GUIConstants.EDGE_PADDING + t9_pad_width,
-                self.canvas_height,
+                self.usable_canvas_height,
             ),
             highlight_color=GUIConstants.ACCENT_COLOR,
         )
@@ -1332,6 +1340,10 @@ class SeedExportXpubDetailsScreen(WarningEdgesMixin, ButtonListScreen):
 
 @dataclass
 class SeedAddPassphraseScreen(BaseTopNavScreen):
+    # Shows a control bar (DEL / OK / scroll) and lays out keys underneath it,
+    # so the overlay's footprint must be excluded from the layout area.
+    reserves_touch_bar = True
+
     passphrase: str = ""
 
     # Only used by the screenshot generator
