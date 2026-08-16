@@ -45,3 +45,4 @@ tools/image_build/
 
 # Local screenshot layout auditor (dev aid)
 tools/audit_screens.py
+tools/build_review_page.py
