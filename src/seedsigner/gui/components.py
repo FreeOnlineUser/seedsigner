@@ -22,6 +22,47 @@ logger = logging.getLogger(__name__)
 
 
 # TODO: Remove all pixel hard coding
+from functools import lru_cache
+
+
+# Supersample factor for anti-aliased shape edges. PIL's rounded_rectangle()
+# draws with NO anti-aliasing, so its arcs are a hard 1px staircase. On the
+# DPI panel that staircase is then doubled by the driver's 2x nearest-neighbour
+# upscale, which is what makes corners read as chunky. Drawing the shape large
+# and downsampling with LANCZOS gives real edge gradients instead.
+SHAPE_SUPERSAMPLE = 4
+
+
+@lru_cache(maxsize=64)
+def get_rounded_rect_mask(width: int, height: int, radius: int, outline_width: int = 0) -> Image.Image:
+    """
+    Anti-aliased alpha mask for a rounded rectangle (cached).
+
+    Buttons repeat a handful of (size, radius) combinations, so the
+    supersampled draw+downsample is paid once per combination and then reused
+    for every button on every render - it does not cost per-frame time.
+
+    outline_width > 0 returns a ring mask (the border only) instead of a
+    filled shape.
+    """
+    ss = SHAPE_SUPERSAMPLE
+    mask = Image.new("L", (width * ss, height * ss), 0)
+    draw = ImageDraw.Draw(mask)
+    draw.rounded_rectangle(
+        (0, 0, width * ss - 1, height * ss - 1),
+        radius=radius * ss,
+        fill=255,
+    )
+    if outline_width:
+        inset = outline_width * ss
+        draw.rounded_rectangle(
+            (inset, inset, width * ss - 1 - inset, height * ss - 1 - inset),
+            radius=max(0, (radius - outline_width)) * ss,
+            fill=0,
+        )
+    return mask.resize((width, height), Image.LANCZOS)
+
+
 class GUIConstants:
     EDGE_PADDING = 8
     COMPONENT_PADDING = 8
@@ -1537,18 +1578,26 @@ class Button(BaseComponent):
             font_color = self.font_color
             outline_color = self.outline_color
 
-        self.image_draw.rounded_rectangle(
-            (
-                self.screen_x,
-                self.screen_y - self.scroll_y,
-                self.screen_x + self.width,
-                self.screen_y + self.height - self.scroll_y
-            ),
-            fill=background_color,
-            radius=self.corner_radius,
-            outline=outline_color,
-            width=2,
+        # Anti-aliased fill: paste a solid colour through a cached, supersampled
+        # rounded mask. A direct rounded_rectangle() has hard stair-stepped
+        # corners, which the panel's 2x upscale then doubles into visible blocks.
+        # Some screens compute button geometry with division, so coerce: PIL
+        # paste boxes and image sizes must be ints, and the mask cache key
+        # must be hashable-stable.
+        w, h = int(self.width), int(self.height)
+        radius = int(self.corner_radius)
+        box = (int(self.screen_x), int(self.screen_y - self.scroll_y))
+        self.canvas.paste(
+            Image.new("RGB", (w, h), background_color),
+            box,
+            get_rounded_rect_mask(w, h, radius),
         )
+        if outline_color:
+            self.canvas.paste(
+                Image.new("RGB", (w, h), outline_color),
+                box,
+                get_rounded_rect_mask(w, h, radius, outline_width=2),
+            )
 
         if self.text is not None:
             if not self.is_scrollable_text:
