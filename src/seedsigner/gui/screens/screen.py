@@ -980,7 +980,10 @@ class LargeButtonScreen(BaseTopNavScreen):
             }
             if icon_name:
                 button_args["icon_name"] = icon_name
-                button_args["text_y_offset"] = int(48 / 240 * self.renderer.canvas_height) + GUIConstants.COMPONENT_PADDING
+                # NOTE: no text_y_offset. It used to be a ratio of the CANVAS
+                # height (48/240 * canvas_height) applied inside a BUTTON,
+                # which drifted as soon as the two stopped being proportional.
+                # Button now centres the icon+label group in the tile itself.
                 button = LargeIconButton(**button_args)
             else:
                 button = Button(**button_args)

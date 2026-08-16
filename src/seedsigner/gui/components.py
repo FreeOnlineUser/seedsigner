@@ -1588,7 +1588,23 @@ class Button(BaseComponent):
             else:
                 self.icon_x = int((self.width - self.icon.width) / 2)
                 if self.text:
-                    self.text_y = self.icon_y + self.icon.height + GUIConstants.COMPONENT_PADDING
+                    # Stacked icon-over-label (e.g. Home tiles): centre the
+                    # GROUP in the button.
+                    #
+                    # Previously the icon was pinned to a fixed top pad and the
+                    # label hung underneath, so every extra pixel of button
+                    # height pooled at the bottom: on the 240x320 canvas that
+                    # left an 8px gap above the icon and 60px below the label.
+                    # It only looked balanced while the tile happened to be
+                    # barely taller than icon+label.
+                    group_height = self.icon.height + GUIConstants.COMPONENT_PADDING + self.text_height
+                    self.icon_y = max(0, int((self.height - group_height) / 2))
+                    # NOTE: the label is drawn by a ScrollableTextLine that is
+                    # positioned from text_y_OFFSET (not text_y), so both must
+                    # be set here - and this must run before the label kwargs
+                    # are built further down.
+                    self.text_y_offset = self.icon_y + self.icon.height + GUIConstants.COMPONENT_PADDING
+                    self.text_y = self.text_y_offset + self.text_height
 
         if self.right_icon_name:
             self.right_icon = Icon(icon_name=self.right_icon_name, icon_size=self.right_icon_size, icon_color=self.right_icon_color)
