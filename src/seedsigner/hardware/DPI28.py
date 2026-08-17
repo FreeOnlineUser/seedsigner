@@ -301,8 +301,8 @@ class DPI28(BaseDisplayDriver):
 
     def compose(self, image: Image.Image) -> Image.Image:
         """
-        Build the full 480x640 physical-panel frame from a native 240x240 UI
-        canvas: 2x nearest-neighbor upscale on top, current touch bar below.
+        Build the full 480x640 physical-panel frame from a native 240x320 UI
+        canvas: 2x nearest-neighbor upscale, plus the control bar if one is set.
 
         Pure PIL, no framebuffer access — also used by the emulator/screenshot
         paths to render exactly what the panel would show.

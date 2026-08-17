@@ -6,7 +6,7 @@ from gettext import gettext as _
 from PIL import Image, ImageDraw
 
 from seedsigner.gui import renderer
-from seedsigner.gui.components import GUIConstants, Fonts, resize_image_to_fill
+from seedsigner.gui.components import is_touch_ui, SeedSignerIconConstants, GUIConstants, Fonts, resize_image_to_fill
 from seedsigner.models.decode_qr import DecodeQR
 from seedsigner.models.threads import BaseThread, ThreadsafeCounter
 
@@ -56,11 +56,15 @@ class ScanScreen(BaseScreen):
         # Initialize the base class
         super().__post_init__()
 
-        # Set touch bar for camera mode (back button on left)
-        self._set_touch_bar('TOUCH_BAR_BACK')
+        # Touch draws its own back control onto the frame (see LivePreviewThread),
+        # so there is no control bar and no "< back" text prefix.
+        self._set_touch_bar('TOUCH_BAR_HIDDEN')
 
-        # TODO: Arrange this with UI elements rather than text
-        self.instructions_text = "< " + _("back") + "  |  " + _(self.instructions_text)
+        if is_touch_ui():
+            self.instructions_text = _(self.instructions_text)
+        else:
+            # TODO: Arrange this with UI elements rather than text
+            self.instructions_text = "< " + _("back") + "  |  " + _(self.instructions_text)
 
         self.camera = Camera.get_instance()
         self.camera.start_video_stream_mode(resolution=self.resolution, framerate=self.framerate, format="rgb")
@@ -96,8 +100,32 @@ class ScanScreen(BaseScreen):
             super().__init__()
 
 
+        # Touch: geometry of the on-frame back control. It sits inside the
+        # top-left region the input layer already treats as Back, so drawing it
+        # is all that is needed - no extra hit testing.
+        BACK_CHIP_RECT = (8, 8, 48, 48)
+
+        def _draw_back_chip(self, frame, icon_font):
+            draw = ImageDraw.Draw(frame)
+            draw.rounded_rectangle(
+                self.BACK_CHIP_RECT,
+                radius=8,
+                fill=GUIConstants.BACKGROUND_COLOR,
+                outline=GUIConstants.ACCENT_COLOR,
+                width=2,
+            )
+            x0, y0, x1, y1 = self.BACK_CHIP_RECT
+            draw.text(
+                (int((x0 + x1)/2), int((y0 + y1)/2)),
+                SeedSignerIconConstants.CHEVRON_LEFT,
+                font=icon_font,
+                fill=GUIConstants.ACCENT_COLOR,
+                anchor="mm",
+            )
+
         def run(self):
             instructions_font = Fonts.get_font(GUIConstants.get_body_font_name(), GUIConstants.get_button_font_size())
+            icon_font = Fonts.get_font(GUIConstants.ICON_FONT_NAME__SEEDSIGNER, 24)
 
             # pre-calculate how big the animated QR percent display can be
             (left, top, right, bottom) = instructions_font.getbbox("100%")
@@ -219,6 +247,9 @@ class ScanScreen(BaseScreen):
                                     outline="black",
                                     width=1,
                                 )
+
+                        if is_touch_ui():
+                            self._draw_back_chip(frame, icon_font)
 
                         self.renderer.show_image(frame, show_direct=True)
 

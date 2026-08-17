@@ -24,9 +24,6 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class SeedMnemonicEntryScreen(BaseTopNavScreen):
-    # Shows a control bar (DEL / OK / scroll) and lays out keys underneath it,
-    # so the overlay's footprint must be excluded from the layout area.
-    reserves_touch_bar = True
 
     initial_letters: list = None
     wordlist: list = None
@@ -270,40 +267,20 @@ class SeedMnemonicEntryScreen(BaseTopNavScreen):
 
 
     def _update_touch_bar(self):
-        """Update touch bar based on whether there's content to delete, words to select, and scroll position"""
-        disp = self.renderer.disp
-        if hasattr(disp, 'set_touch_bar_labels'):
-            from seedsigner.hardware.DPI28 import DPI28
-            # DEL is active (orange) if there's content to delete (not just empty space)
-            has_content = len(self.letters) > 1 or (len(self.letters) == 1 and self.letters[0] != " ")
-            # WORD is active (orange) if there are possible words to select
-            has_words = hasattr(self, 'possible_words') and self.possible_words
-            # Down arrow is active (orange) if we can scroll down (not at bottom of word list)
-            can_scroll_down = has_words and hasattr(self, 'selected_possible_words_index') and self.selected_possible_words_index < len(self.possible_words) - 1
+        """
+        No control bar on this screen.
 
-            if has_words and has_content:
-                if can_scroll_down:
-                    disp.set_touch_bar_labels(DPI28.TOUCH_BAR_KEYBOARD_BOTH_ACTIVE)
-                else:
-                    disp.set_touch_bar_labels(DPI28.TOUCH_BAR_KEYBOARD_BOTH_ACTIVE_DOWN_DISABLED)
-            elif has_words:
-                if can_scroll_down:
-                    disp.set_touch_bar_labels(DPI28.TOUCH_BAR_KEYBOARD_WORD_ACTIVE)
-                else:
-                    # At bottom with words but no content - WORD active, down grey
-                    disp.set_touch_bar_labels(DPI28.TOUCH_BAR_KEYBOARD_BOTH_ACTIVE_DOWN_DISABLED)
-            elif has_content:
-                disp.set_touch_bar_labels(DPI28.TOUCH_BAR_KEYBOARD_DEL_ACTIVE)
-            else:
-                disp.set_touch_bar_labels(DPI28.TOUCH_BAR_KEYBOARD_DOWN_DISABLED)
+        Every action it used to carry already exists on the canvas and is
+        tapped directly: backspace is a key in the pad, the word list scrolls
+        with its own arrows, and the highlighted word is tapped to accept it.
+        Kept as a no-op so the call sites in the input loop stay readable.
+        """
+        self._set_touch_bar('TOUCH_BAR_HIDDEN')
 
 
     def _reset_touch_bar(self):
-        """Reset touch bar to default labels when leaving keyboard screen"""
-        disp = self.renderer.disp
-        if hasattr(disp, 'set_touch_bar_labels'):
-            from seedsigner.hardware.DPI28 import DPI28
-            disp.set_touch_bar_labels(DPI28.TOUCH_BAR_DEFAULT)
+        """Clear the control bar when leaving this screen"""
+        self._set_touch_bar('TOUCH_BAR_HIDDEN')
 
 
     def _run(self):
@@ -553,10 +530,170 @@ class SeedMnemonicEntryScreen(BaseTopNavScreen):
 
 
 @dataclass
+class SeedMnemonicEntryQwertyScreen(SeedMnemonicEntryScreen):
+    """
+    Seed word entry on a full QWERTY keyboard, laid out for a touch panel.
+
+    Proportions follow the Ledger Flex, whose screen is 480x600 against this
+    panel's 480x640: a 3-row letters-only keyboard across the full width, a
+    strip of tapped word suggestions above it, and the text being typed above
+    that. At 10 keys across 480 physical px each key is ~4mm wide, which is
+    what Ledger ships, so no device rotation is needed to fit a real keyboard.
+
+    Everything about BIP-39 filtering and word selection is inherited; only the
+    layout and the suggestion strip differ.
+    """
+    QWERTY_ROWS = ["qwertyuiop", "asdfghjkl", "zxcvbnm"]
+
+    # Native px (the panel doubles these). 44 -> 88 physical px, the same
+    # target height as every other tappable control in this build, and taller
+    # than the Flex's 72 because this panel has the room.
+    KEY_HEIGHT = 44
+    SUGGESTION_HEIGHT = 30
+    MAX_VISIBLE_SUGGESTIONS = 2
+
+    def __post_init__(self):
+        super().__post_init__()
+        self._build_qwerty_layout()
+
+    def _build_qwerty_layout(self):
+        keyboard_bottom = self.canvas_height - GUIConstants.EDGE_PADDING
+        keyboard_top = keyboard_bottom - (3*self.KEY_HEIGHT + 2*2)
+
+        # Full-bleed like the Flex: the outer keys reach the panel edge, which
+        # buys every key ~2 more native px of width.
+        self.keyboard = Keyboard(
+            draw=self.image_draw,
+            row_charsets=self.QWERTY_ROWS,
+            font_size=GUIConstants.get_button_font_size() + 2,
+            cols=10,
+            rect=(0, keyboard_top, self.canvas_width, keyboard_bottom),
+            additional_keys=[Keyboard.KEY_BACKSPACE],
+            auto_wrap=[Keyboard.WRAP_LEFT, Keyboard.WRAP_RIGHT],
+            render_now=False,
+        )
+        self.keyboard.update_active_keys(active_keys=self.possible_alphabet)
+        # Nothing is pre-selected: on a touch build the key highlight is press
+        # feedback, not a cursor, so showing one before the user has tapped
+        # anything just reads as a stray mark.
+        for row in self.keyboard.keys:
+            for key in row:
+                key.is_selected = False
+
+        # Text entry across the full width, no longer sharing the row with a
+        # vertical match list.
+        self.text_entry_display = TextEntryDisplay(
+            canvas=self.canvas,
+            rect=(
+                GUIConstants.EDGE_PADDING,
+                self.top_nav.height,
+                self.canvas_width - GUIConstants.EDGE_PADDING,
+                self.top_nav.height + 30,
+            ),
+            is_centered=False,
+            cur_text="".join(self.letters),
+        )
+
+        # Suggestion strip, directly above the keyboard as on the Flex: the two
+        # nearest candidates tapped directly, chevrons to page through the rest
+        # (the Flex shows 2 of up to 8).
+        self.suggestions_y = keyboard_top - GUIConstants.COMPONENT_PADDING - self.SUGGESTION_HEIGHT
+        arrow_width = 16
+        gap = 2
+        strip_width = self.canvas_width - 2*GUIConstants.EDGE_PADDING
+        chip_width = int((strip_width - 2*arrow_width - 3*gap) / self.MAX_VISIBLE_SUGGESTIONS)
+
+        # Shrink the chip font until the longest word in the wordlist fits, so a
+        # suggestion is never clipped (the whole point of the strip is to read
+        # the word before committing to it). Button reserves COMPONENT_PADDING
+        # on each side, so measure against that same budget.
+        available_text_width = chip_width - 2*GUIConstants.COMPONENT_PADDING
+        longest = max(self.wordlist, key=len) if self.wordlist else "mushroom"
+        suggestion_font_size = GUIConstants.get_button_font_size()
+        while suggestion_font_size > 9:
+            font = Fonts.get_font(GUIConstants.FIXED_WIDTH_EMPHASIS_FONT_NAME, suggestion_font_size)
+            left, top, right, bottom = font.getbbox(longest, anchor="ls")
+            if right <= available_text_width:
+                break
+            suggestion_font_size -= 1
+
+        self.matches_list_up_button = IconButton(
+            icon_name=SeedSignerIconConstants.CHEVRON_LEFT,
+            icon_size=GUIConstants.ICON_INLINE_FONT_SIZE,
+            screen_x=GUIConstants.EDGE_PADDING,
+            screen_y=self.suggestions_y,
+            width=arrow_width,
+            height=self.SUGGESTION_HEIGHT,
+        )
+        self.matches_list_highlight_button = Button(
+            text=longest,
+            font_name=GUIConstants.FIXED_WIDTH_EMPHASIS_FONT_NAME,
+            font_size=suggestion_font_size,
+            is_text_centered=False,
+            screen_x=GUIConstants.EDGE_PADDING + arrow_width + gap,
+            screen_y=self.suggestions_y,
+            width=chip_width,
+            height=self.SUGGESTION_HEIGHT,
+            is_scrollable_text=False,
+        )
+        self.suggestion_next_button = Button(
+            text=longest,
+            font_name=GUIConstants.FIXED_WIDTH_EMPHASIS_FONT_NAME,
+            font_size=suggestion_font_size,
+            is_text_centered=False,
+            screen_x=self.matches_list_highlight_button.screen_x + chip_width + gap,
+            screen_y=self.suggestions_y,
+            width=chip_width,
+            height=self.SUGGESTION_HEIGHT,
+            is_scrollable_text=False,
+        )
+        self.matches_list_down_button = IconButton(
+            icon_name=SeedSignerIconConstants.CHEVRON_RIGHT,
+            icon_size=GUIConstants.ICON_INLINE_FONT_SIZE,
+            screen_x=self.canvas_width - GUIConstants.EDGE_PADDING - arrow_width,
+            screen_y=self.suggestions_y,
+            width=arrow_width,
+            height=self.SUGGESTION_HEIGHT,
+        )
+
+        # render_possible_matches() clears this band; keep the parent's fields
+        # pointing at the strip rather than the old right-hand column.
+        self.matches_list_x = 0
+        self.highlighted_row_y = self.suggestions_y
+
+    def render_possible_matches(self, highlight_word=None):
+        """
+        Draw the suggestion strip: two candidates plus paging chevrons.
+
+        No renderer lock here: every caller already holds it, and it is a plain
+        non-reentrant Lock.
+        """
+        self.renderer.draw.rectangle(
+            (0, self.suggestions_y - 2, self.canvas_width,
+             self.suggestions_y + self.SUGGESTION_HEIGHT + 2),
+            fill=GUIConstants.BACKGROUND_COLOR,
+        )
+        if not self.possible_words:
+            return
+
+        index = self.selected_possible_words_index
+        self.matches_list_highlight_button.text = self.possible_words[index]
+        self.matches_list_highlight_button.is_selected = True
+        self.matches_list_highlight_button.render()
+
+        if index + 1 < len(self.possible_words):
+            self.suggestion_next_button.text = self.possible_words[index + 1]
+            self.suggestion_next_button.is_selected = False
+            self.suggestion_next_button.render()
+
+        if index > 0:
+            self.matches_list_up_button.render()
+        if index + self.MAX_VISIBLE_SUGGESTIONS < len(self.possible_words):
+            self.matches_list_down_button.render()
+
+
+@dataclass
 class SeedMnemonicEntryT9Screen(BaseTopNavScreen):
-    # Shows a control bar (DEL / OK / scroll) and lays out keys underneath it,
-    # so the overlay's footprint must be excluded from the layout area.
-    reserves_touch_bar = True
 
     """
     T9 keyboard for seed word entry (touchscreen-optimized).
@@ -599,7 +736,7 @@ class SeedMnemonicEntryT9Screen(BaseTopNavScreen):
                 GUIConstants.EDGE_PADDING,
                 t9_top,
                 GUIConstants.EDGE_PADDING + t9_pad_width,
-                self.usable_canvas_height,
+                self.usable_canvas_height - GUIConstants.EDGE_PADDING,
             ),
             highlight_color=GUIConstants.ACCENT_COLOR,
         )
@@ -761,34 +898,19 @@ class SeedMnemonicEntryT9Screen(BaseTopNavScreen):
         self.renderer.show_image()
 
     def _update_touch_bar(self):
-        """Update touch bar based on current state."""
-        disp = self.renderer.disp
-        if hasattr(disp, 'set_touch_bar_labels'):
-            from seedsigner.hardware.DPI28 import DPI28
-            has_content = len(self.letters) > 1 or (len(self.letters) == 1 and self.letters[0] != " ")
-            has_words = bool(self.possible_words)
-            can_scroll_down = has_words and self.selected_possible_words_index < len(self.possible_words) - 1
+        """
+        No control bar on this screen.
 
-            if has_words and has_content:
-                if can_scroll_down:
-                    disp.set_touch_bar_labels(DPI28.TOUCH_BAR_KEYBOARD_BOTH_ACTIVE)
-                else:
-                    disp.set_touch_bar_labels(DPI28.TOUCH_BAR_KEYBOARD_BOTH_ACTIVE_DOWN_DISABLED)
-            elif has_words:
-                if can_scroll_down:
-                    disp.set_touch_bar_labels(DPI28.TOUCH_BAR_KEYBOARD_WORD_ACTIVE)
-                else:
-                    disp.set_touch_bar_labels(DPI28.TOUCH_BAR_KEYBOARD_BOTH_ACTIVE_DOWN_DISABLED)
-            elif has_content:
-                disp.set_touch_bar_labels(DPI28.TOUCH_BAR_KEYBOARD_DEL_ACTIVE)
-            else:
-                disp.set_touch_bar_labels(DPI28.TOUCH_BAR_KEYBOARD_DOWN_DISABLED)
+        Every action it used to carry already exists on the canvas and is
+        tapped directly: backspace is a key in the pad, the word list scrolls
+        with its own arrows, and the highlighted word is tapped to accept it.
+        Kept as a no-op so the call sites in the input loop stay readable.
+        """
+        self._set_touch_bar('TOUCH_BAR_HIDDEN')
 
     def _reset_touch_bar(self):
-        disp = self.renderer.disp
-        if hasattr(disp, 'set_touch_bar_labels'):
-            from seedsigner.hardware.DPI28 import DPI28
-            disp.set_touch_bar_labels(DPI28.TOUCH_BAR_DEFAULT)
+        """Clear the control bar when leaving this screen"""
+        self._set_touch_bar('TOUCH_BAR_HIDDEN')
 
     def _update_pad_active_letters(self):
         """
@@ -1242,7 +1364,9 @@ class SeedBIP85SelectChildIndexScreen(KeyboardScreen):
 
         super().__post_init__()
 
-        self._set_touch_bar('TOUCH_BAR_BACK_AND_OK')
+        # The keyboard draws its own save button and the top nav a back arrow,
+        # so there is nothing left for a control bar to add.
+        self._set_touch_bar('TOUCH_BAR_HIDDEN')
 
 
 
@@ -1340,9 +1464,6 @@ class SeedExportXpubDetailsScreen(WarningEdgesMixin, ButtonListScreen):
 
 @dataclass
 class SeedAddPassphraseScreen(BaseTopNavScreen):
-    # Shows a control bar (DEL / OK / scroll) and lays out keys underneath it,
-    # so the overlay's footprint must be excluded from the layout area.
-    reserves_touch_bar = True
 
     passphrase: str = ""
 

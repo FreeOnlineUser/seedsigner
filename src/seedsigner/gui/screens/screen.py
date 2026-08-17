@@ -102,6 +102,70 @@ class BaseScreen(BaseComponent):
                 disp.set_touch_bar_labels(preset)
 
 
+    # ---------------------------------------------------------------- on-canvas
+    # controls. Full-bleed screens (camera, QR) have no list to tap and no top
+    # nav, so the actions that used to live on the control bar are drawn into
+    # the canvas itself and registered as tap targets.
+    TOUCH_CONTROL_HEIGHT = 44
+    TOUCH_CONTROL_GAP = 8
+
+    def _make_touch_controls(self, specs: list, y: int = None) -> list:
+        """
+        Lay out a row of controls along the bottom of the canvas.
+
+        Args:
+            specs: one dict per control: {'key': <HardwareButtonsConstants key
+                   this control stands in for>, and either 'icon' or 'text'}.
+                   An optional 'weight' widens a control relative to its
+                   siblings (e.g. a shutter next to two narrow chips).
+            y:     top edge; defaults to a control-height row above the bottom.
+
+        Returns the Buttons, in the same order, with `.touch_key` set. The
+        caller renders them and maps a tap back to its key with
+        `_tapped_touch_control_key()`.
+        """
+        if y is None:
+            y = self.canvas_height - self.TOUCH_CONTROL_HEIGHT - self.TOUCH_CONTROL_GAP
+
+        total_weight = sum(spec.get('weight', 1) for spec in specs)
+        available = self.canvas_width - 2*GUIConstants.EDGE_PADDING - self.TOUCH_CONTROL_GAP*(len(specs) - 1)
+        controls = []
+        x = GUIConstants.EDGE_PADDING
+        for spec in specs:
+            width = int(available * spec.get('weight', 1) / total_weight)
+            shared = dict(
+                width=width,
+                height=self.TOUCH_CONTROL_HEIGHT,
+                screen_x=x,
+                screen_y=y,
+                outline_color=GUIConstants.ACCENT_COLOR,
+            )
+            if spec.get('icon'):
+                control = IconButton(icon_name=spec['icon'], **shared)
+            else:
+                control = Button(text=spec['text'], is_scrollable_text=False, **shared)
+            control.touch_key = spec['key']
+            controls.append(control)
+            x += width + self.TOUCH_CONTROL_GAP
+
+        self._touch_controls = controls
+        if hasattr(self.hw_inputs, 'register_buttons'):
+            self.hw_inputs.register_buttons(controls)
+            self.hw_inputs.register_control_keys(controls)
+        return controls
+
+
+    def _tapped_touch_control_key(self):
+        """The key of the control just tapped, or None."""
+        if not hasattr(self.hw_inputs, 'get_tapped_button_index'):
+            return None
+        index = self.hw_inputs.get_tapped_button_index()
+        controls = getattr(self, '_touch_controls', [])
+        if 0 <= index < len(controls):
+            return controls[index].touch_key
+        return None
+
+
     # Touch: centre this screen's body content in the space under the title
     # bar. Opt-in, because some screens place things deliberately. Screens
     # that simply stack text from a fixed top pad end up with all the extra
@@ -545,20 +609,6 @@ class ButtonListScreen(BaseTopNavScreen):
         an action that has no on-screen equivalent, e.g. keyboards, camera.)
         """
         self._set_touch_bar('TOUCH_BAR_HIDDEN')
-
-    def _update_touch_bar_for_list_position(self):
-        """Update touch bar based on current list scroll position"""
-        at_top = self.selected_button == 0
-        at_bottom = self.selected_button == len(self.buttons) - 1
-
-        if at_top and at_bottom:
-            self._set_touch_bar('TOUCH_BAR_SELECT_ONLY')
-        elif at_top:
-            self._set_touch_bar('TOUCH_BAR_UP_DISABLED')
-        elif at_bottom:
-            self._set_touch_bar('TOUCH_BAR_DOWN_DISABLED')
-        else:
-            self._set_touch_bar('TOUCH_BAR_DEFAULT')
 
     def get_threads(self) -> List[BaseThread]:
         threads = super().get_threads()
@@ -1110,17 +1160,9 @@ class LargeButtonScreen(BaseTopNavScreen):
         if hasattr(self.hw_inputs, 'register_press_handler'):
             self.hw_inputs.register_press_handler(self._handle_press_feedback)
 
-        # Set touch bar based on screen type. With single-tap tiles the bar has
-        # no selection role left, so hide it - but keep an explicit Back
-        # control when the screen has one, since the top-left corner tap is
-        # not self-evident.
-        if self.single_tap_buttons:
-            if self.top_nav.show_back_button:
-                self._set_touch_bar('TOUCH_BAR_BACK')
-            else:
-                self._set_touch_bar('TOUCH_BAR_HIDDEN')
-        else:
-            self._set_touch_bar('TOUCH_BAR_SELECT_ONLY')
+        # Tiles are tapped directly and the top nav already draws a back arrow,
+        # so there is nothing left for a control bar to do here.
+        self._set_touch_bar('TOUCH_BAR_HIDDEN')
 
     def _handle_press_feedback(self, index):
         """Paint the tile under the finger as pressed, or clear it."""
@@ -1341,6 +1383,10 @@ class QRDisplayScreen(BaseScreen):
             settings = Settings.get_instance()
             cur_brightness_setting = settings.get_value(SettingsConstants.SETTING__QR_BRIGHTNESS_TIPS)
             is_brightness_tip_enabled = cur_brightness_setting == SettingsConstants.OPTION__ENABLED
+            if is_touch_ui():
+                # Touch shows real brightness controls below the QR, so the
+                # chevron tips toast (which also covers the QR) is redundant.
+                is_brightness_tip_enabled = False
             pending_encoder_restart = False
 
             # Loop whether the QR is a single frame or animated; each loop might adjust
@@ -1392,7 +1438,24 @@ class QRDisplayScreen(BaseScreen):
         from seedsigner.models.settings import Settings
 
         # Set touch bar for QR brightness control
-        self._set_touch_bar('TOUCH_BAR_QR_BRIGHTNESS')
+        self._set_touch_bar('TOUCH_BAR_HIDDEN')
+
+        if _is_touch_mode():
+            # The QR is 240x240 on a 240x320 canvas, so the strip below it is
+            # free: the controls live there and never cover the code. The QR
+            # thread only pastes the top 240 rows, so they survive every frame.
+            controls = self._make_touch_controls([
+                # TRANSLATOR_NOTE: Decrease QR code screen brightness
+                dict(text=_("Darker"), key=HardwareButtonsConstants.KEY_DOWN),
+                # TRANSLATOR_NOTE: Increase QR code screen brightness
+                dict(text=_("Brighter"), key=HardwareButtonsConstants.KEY_UP),
+                # TRANSLATOR_NOTE: Leave this screen
+                dict(text=_("Done"), key=HardwareButtonsConstants.KEY_PRESS),
+            ])
+            with self.renderer.lock:
+                for control in controls:
+                    control.render()
+                self.renderer.show_image()
 
         while True:
             user_input = self.hw_inputs.wait_for(
@@ -1404,13 +1467,14 @@ class QRDisplayScreen(BaseScreen):
                 ] + HardwareButtonsConstants.KEYS__ANYCLICK
             )
 
-            # Touch bar: KEY1 (left) = brighter, KEY3 (right) = darker.
-            # GPIO builds keep upstream behavior (any click exits the QR view).
+            # Touch: only the three controls act. A stray tap while lining the
+            # QR up under a camera must not dismiss it, so everything else is
+            # ignored. GPIO builds keep upstream behavior (any click exits).
             if _is_touch_mode():
-                if user_input == HardwareButtonsConstants.KEY1:
-                    user_input = HardwareButtonsConstants.KEY_UP
-                elif user_input == HardwareButtonsConstants.KEY3:
-                    user_input = HardwareButtonsConstants.KEY_DOWN
+                tapped_key = self._tapped_touch_control_key()
+                if tapped_key is None:
+                    continue
+                user_input = tapped_key
 
             if user_input == HardwareButtonsConstants.KEY_DOWN:
                 # Reduce QR code background brightness

@@ -107,6 +107,10 @@ class TouchButtons(Singleton):
         # Direct tap support
         # List of (x, y, width, height, index) in NATIVE coords (240x240)
         self.button_rects: List[Tuple[int, int, int, int, int]] = []
+        # On-canvas controls: same rects, but each carries the key code it
+        # stands in for, so polling screens (check_for_low) can recognise them
+        # without knowing their index.
+        self.control_rects: List[Tuple[int, int, int, int, int]] = []
         self._tapped_button_index = -1
         self._back_button_tapped = False
         self._power_button_tapped = False
@@ -190,9 +194,32 @@ class TouchButtons(Singleton):
                 h = btn.height
                 self.button_rects.append((x, y - pad_y, w, h + 2 * pad_y, i))
 
+    def register_control_keys(self, controls: list):
+        """
+        Register on-canvas controls that stand in for hardware keys.
+
+        Each control needs screen_x/screen_y/width/height in NATIVE canvas
+        space plus a `touch_key`. Unlike register_buttons, which reports an
+        index, these map straight to a key code, so screens that poll with
+        check_for_low() (live camera loops) see them as that key.
+        """
+        self.control_rects = [
+            (c.screen_x, c.screen_y, c.width, c.height, c.touch_key)
+            for c in controls if hasattr(c, 'touch_key')
+        ]
+
+    def _control_key_at(self, touch_x: int, touch_y: int):
+        """Key of the on-canvas control under this touch, or None."""
+        native_x, native_y = touch_x // 2, touch_y // 2
+        for x, y, w, h, key in self.control_rects:
+            if x <= native_x <= x + w and y <= native_y <= y + h:
+                return key
+        return None
+
     def clear_buttons(self):
         """Clear registered button positions"""
         self.button_rects = []
+        self.control_rects = []
         self._tapped_button_index = -1
 
     def get_tapped_button_index(self) -> int:
@@ -255,6 +282,7 @@ class TouchButtons(Singleton):
         self._back_button_tapped = False
         self._power_button_tapped = False
         self._touch_bar_back_tapped = False
+        self._tap_latch = None
         self.touch_down = False
         # Drain any pending touch events
         while self.touch.poll():
@@ -683,6 +711,9 @@ class TouchButtons(Singleton):
         back corner -> KEY1, touch bar thirds -> KEY1/KEY2/KEY3,
         anywhere else in the UI area -> KEY_PRESS.
         """
+        control_key = self._control_key_at(x, y)
+        if control_key is not None:
+            return control_key
         if self._check_back_button_tap(x, y):
             return self.KEY1
         if y >= self.TOUCH_BAR_TOP and self._bar_visible():
