@@ -310,11 +310,17 @@ class SettingsConstants:
     KEYBOARD_MODE__STANDARD = "std"
     KEYBOARD_MODE__T9 = "t9"
     KEYBOARD_MODE__T9_PREDICT = "t9p"
+    KEYBOARD_MODE__QWERTY = "qwerty"
     ALL_KEYBOARD_MODES = [
         (KEYBOARD_MODE__STANDARD, _mft("Standard")),
         (KEYBOARD_MODE__T9, _mft("T9")),
         (KEYBOARD_MODE__T9_PREDICT, _mft("T9 predict")),
     ]
+    if os.environ.get('SEEDSIGNER_TOUCH') == '1':
+        # Tapping a 10-across QWERTY needs a touchscreen, so a hardware-button
+        # build is not offered a mode it cannot drive (and its settings screens
+        # stay identical to upstream).
+        ALL_KEYBOARD_MODES.insert(1, (KEYBOARD_MODE__QWERTY, _mft("QWERTY")))
 
     WORDLIST_LANGUAGE__ENGLISH = "en"
     WORDLIST_LANGUAGE__CHINESE_SIMPLIFIED = "zh_Hans_CN"
@@ -829,13 +835,14 @@ class SettingsDefinition:
             if key in as_dict:
                 as_dict[key] = SettingsConstants.CAMERA_ROTATION__90
 
-            # The T9 predictive keyboard is the touch-native way to enter seed
-            # words (tappable grid cells); hardware-button builds keep the
-            # upstream standard keyboard so their behavior is unchanged.
+            # QWERTY is the touch-native way to enter seed words: 10 keys across
+            # 480 physical px is ~4mm each, the same key size the Ledger Flex
+            # ships on a 480x600 panel. Hardware-button builds keep the upstream
+            # standard keyboard so their behavior is unchanged.
             entry = cls.get_settings_entry(SettingsConstants.SETTING__KEYBOARD_MODE)
             key = entry.abbreviated_name if use_abbreviated_name else entry.attr_name
             if key in as_dict:
-                as_dict[key] = SettingsConstants.KEYBOARD_MODE__T9_PREDICT
+                as_dict[key] = SettingsConstants.KEYBOARD_MODE__QWERTY
 
         return as_dict
 

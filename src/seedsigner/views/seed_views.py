@@ -8,7 +8,7 @@ from gettext import gettext as _
 
 from embit.descriptor import Descriptor
 
-from seedsigner.gui.components import FontAwesomeIconConstants, SeedSignerIconConstants
+from seedsigner.gui.components import is_touch_ui, FontAwesomeIconConstants, SeedSignerIconConstants
 from seedsigner.gui.screens import (RET_CODE__BACK_BUTTON, ButtonListScreen,
     WarningScreen, DireWarningScreen, seed_screens)
 from seedsigner.gui.screens.screen import ButtonOption, ButtonOptionWithoutTranslation
@@ -226,6 +226,10 @@ class SeedMnemonicEntryView(View):
             screen_class = seed_screens.SeedMnemonicEntryT9Screen
             default_initial = [" "]  # T9 starts empty
             extra_kwargs["predictive"] = keyboard_mode == SettingsConstants.KEYBOARD_MODE__T9_PREDICT
+        elif keyboard_mode == SettingsConstants.KEYBOARD_MODE__QWERTY and is_touch_ui():
+            # Turns the panel sideways so a full QWERTY keyboard fits.
+            screen_class = seed_screens.SeedMnemonicEntryQwertyScreen
+            default_initial = [" "]
         else:
             screen_class = seed_screens.SeedMnemonicEntryScreen
             default_initial = ["a"]

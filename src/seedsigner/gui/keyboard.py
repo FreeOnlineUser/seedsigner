@@ -207,12 +207,22 @@ class Keyboard:
                  additional_keys=[KEY_BACKSPACE],
                  auto_wrap=[WRAP_TOP, WRAP_BOTTOM, WRAP_LEFT, WRAP_RIGHT],
                  render_now=True,
-                 highlight_color: str = GUIConstants.ACCENT_COLOR):
+                 highlight_color: str = GUIConstants.ACCENT_COLOR,
+                 row_charsets: list = None):
         """
             `auto_wrap` specifies which edges the keyboard is allowed to loop back when
             navigating past the end.
+
+            `row_charsets` gives each row its own string, for layouts whose rows
+            are not all the same length (QWERTY is 10/9/7). Rows shorter than
+            `cols` are centred. When given, it replaces `charset`/`rows`.
         """
         self.draw = draw
+        self.row_charsets = row_charsets
+        if row_charsets:
+            charset = "".join(row_charsets)
+            rows = len(row_charsets)
+            cols = max(cols, max(len(row) for row in row_charsets))
         self.charset = charset
         self.rows = rows
         self.cols = cols
@@ -260,9 +270,19 @@ class Keyboard:
         cur_y = self.y_start
         for i in range(0, rows):
             cur_row = []
-            cur_x = self.x_start
+            if self.row_charsets:
+                row_letters = self.row_charsets[i]
+                # Centre a short row (QWERTY's middle and bottom rows).
+                row_span = len(row_letters) * (self.key_width + self.x_gap) - self.x_gap
+                if i == rows - 1 and additional_keys:
+                    extra = sum(k["size"] for k in additional_keys)
+                    row_span += extra * (self.key_width + self.x_gap)
+                cur_x = self.x_start + max(0, (self.width - row_span) // 2)
+            else:
+                row_letters = charset[i*cols:(i+1)*cols]
+                cur_x = self.x_start
             cur_index_x = 0
-            for letter in charset[i*cols:(i+1)*cols]:
+            for letter in row_letters:
                 is_selected = False
                 if letter == selected_char:
                     is_selected = True
@@ -839,16 +859,21 @@ class T9Pad:
 
         self.draw.rounded_rectangle((x1, y1, x2, y2), fill=bg, radius=4, outline=outline)
 
-        # Draw number at top-center
+        # Draw the number and its letters as one centred group. Anchoring the
+        # number to the key's top and the letters to its bottom reads fine on a
+        # short key, but the taller keys this panel allows would pull them to
+        # opposite ends and stop reading as one key.
         cx = (x1 + x2) // 2
-        num_y = y1 + 4
+        cy = (y1 + y2) // 2
+        group_gap = 3
+        num_y = cy - group_gap
         self.draw.text((cx, num_y), str(key_val), fill=num_color,
-                       font=self.number_font, anchor="mt")
+                       font=self.number_font, anchor="mb")
 
         # Draw letters below, highlighting the cycling letter
         letters = self.T9_GROUPS[key_val]
         valid_letters = self.get_valid_letters(key_val)
-        letter_y = y2 - 4
+        letter_y = cy + group_gap + self.letter_font.size
         spacing = 10 if len(letters) > 3 else 12
         total_width = len(letters) * spacing
         start_x = cx - total_width // 2
