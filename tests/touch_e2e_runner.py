@@ -312,6 +312,109 @@ def s8():
     assert finish(t, holder) == idx
 
 
+
+@scenario("qwerty_key_tap_types_a_letter")
+def s9():
+    """Tapping a QWERTY key appends that letter to the entry field."""
+    from seedsigner.gui.screens import seed_screens
+    from seedsigner.models.seed import Seed
+    from seedsigner.models.settings_definition import SettingsConstants
+
+    wordlist = Seed.get_wordlist(SettingsConstants.WORDLIST_LANGUAGE__ENGLISH)
+    screen = seed_screens.SeedMnemonicEntryQwertyScreen(
+        title="Seed Word #1", initial_letters=[" "], wordlist=wordlist)
+    thread, holder = run_screen_async(screen)
+    wait_for_render_keyboard(screen, holder)
+
+    key = find_key(screen, "f")
+    assert key is not None, "no 'f' key in the QWERTY layout"
+    tap_key(screen, key)
+    time.sleep(0.3)
+
+    typed = "".join(screen.letters).strip()
+    assert typed == "f", f"expected 'f' typed, got {typed!r}"
+
+    # Leave via the back corner so the thread ends
+    tap(20, 20)
+    finish(thread, holder)
+
+
+@scenario("qwerty_suggestion_tap_selects_word")
+def s10():
+    """Typing narrows the suggestions; tapping one returns that word."""
+    from seedsigner.gui.screens import seed_screens
+    from seedsigner.models.seed import Seed
+    from seedsigner.models.settings_definition import SettingsConstants
+
+    wordlist = Seed.get_wordlist(SettingsConstants.WORDLIST_LANGUAGE__ENGLISH)
+    screen = seed_screens.SeedMnemonicEntryQwertyScreen(
+        title="Seed Word #1", initial_letters=list("mush"), wordlist=wordlist)
+    thread, holder = run_screen_async(screen)
+    wait_for_render_keyboard(screen, holder)
+
+    assert screen.possible_words, "no suggestions for the prefix 'mush'"
+    expected = screen.possible_words[0]
+
+    btn = screen.matches_list_highlight_button
+    tap((btn.screen_x + btn.width // 2) * 2, (btn.screen_y + btn.height // 2) * 2)
+
+    result = finish(thread, holder)
+    assert result == expected, f"expected {expected!r} selected, got {result!r}"
+
+
+@scenario("qwerty_keys_fit_the_panel")
+def s11():
+    """Every key sits inside the canvas and is at least 40 physical px wide."""
+    from seedsigner.gui.screens import seed_screens
+    from seedsigner.models.seed import Seed
+    from seedsigner.models.settings_definition import SettingsConstants
+
+    wordlist = Seed.get_wordlist(SettingsConstants.WORDLIST_LANGUAGE__ENGLISH)
+    screen = seed_screens.SeedMnemonicEntryQwertyScreen(
+        title="Seed Word #1", initial_letters=[" "], wordlist=wordlist)
+    kb = screen.keyboard
+
+    assert kb.rect[3] <= screen.canvas_height, "keyboard runs off the bottom"
+    for row in kb.keys:
+        for key in row:
+            right = key.screen_x + kb.key_width * key.size
+            assert 0 <= key.screen_x and right <= screen.canvas_width, (
+                f"key {key.letter!r} spans {key.screen_x}..{right}, canvas is "
+                f"0..{screen.canvas_width}")
+    # Physical px = native * 2; ~4mm is the Ledger Flex key width.
+    assert kb.key_width * 2 >= 40, f"keys only {kb.key_width * 2}px wide"
+    assert kb.key_height * 2 >= 72, f"keys only {kb.key_height * 2}px tall"
+
+
+def wait_for_render_keyboard(screen, holder, timeout=5.0):
+    """wait_for_render() wants screen.buttons; keyboard screens have none."""
+    deadline = time.time() + timeout
+    renderer = Renderer.get_instance()
+    while time.time() < deadline:
+        if "error" in holder:
+            raise holder["error"]
+        if renderer.frames > 0:
+            time.sleep(0.2)
+            return
+        time.sleep(0.02)
+    raise AssertionError("screen never rendered")
+
+
+def find_key(screen, letter):
+    for row in screen.keyboard.keys:
+        for key in row:
+            if key.letter == letter:
+                return key
+    return None
+
+
+def tap_key(screen, key):
+    kb = screen.keyboard
+    x = key.screen_x + (kb.key_width * key.size) // 2
+    y = key.screen_y + kb.key_height // 2
+    tap(x * 2, y * 2)
+
+
 def main():
     # TouchButtons.wait_for consults the Controller singleton for screensaver
     # timing; keep it inert without booting the full app.
@@ -322,7 +425,7 @@ def main():
     E2ERenderer.configure_instance()
 
     with patch("seedsigner.controller.Controller.get_instance", return_value=controller):
-        for fn in (s1, s2, s3, s4, s5, s6, s7, s8):
+        for fn in (s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11):
             fn()
 
     print(f"\n{len(PASSED)} passed, {len(FAILED)} failed")
